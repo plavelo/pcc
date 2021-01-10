@@ -76,10 +76,7 @@ fn merge_results(
 
 type Parser = dyn Fn(String, i32) -> Result<Success, Failure>;
 
-fn parse<P>(parser: Box<Parser>, source: String) -> Result<Success, Failure>
-where
-    P: Fn(String, i32) -> Result<Success, Failure>,
-{
+fn parse(parser: Box<Parser>, source: String) -> Result<Success, Failure> {
     skip(parser, eof())(source, 0)
 }
 
@@ -177,4 +174,21 @@ fn map(parser: Box<Parser>, func: Box<dyn Fn(String) -> String>) -> Box<Parser> 
             reply
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn string_ok() {
+        let result = parse(string("source"), "source".to_string());
+        assert_eq!(result.is_ok(), true);
+    }
+
+    #[test]
+    fn string_error() {
+        let result = parse(string("source"), "other".to_string());
+        assert_eq!(result.is_err(), true);
+    }
 }
