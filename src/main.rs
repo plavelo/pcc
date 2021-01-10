@@ -182,13 +182,15 @@ mod tests {
 
     #[test]
     fn string_ok() {
-        let result = parse(string("source"), "source".to_string());
+        let parser = string("source");
+        let result = parse(parser, "source".to_string());
         assert_eq!(result.is_ok(), true);
     }
 
     #[test]
     fn string_error() {
-        let result = parse(string("source"), "other".to_string());
+        let parser = string("source");
+        let result = parse(parser, "other".to_string());
         assert_eq!(result.is_err(), true);
     }
 }
