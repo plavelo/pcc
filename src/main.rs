@@ -144,21 +144,6 @@ where
     }
 }
 
-fn chain<'a, P, F>(parser: P, func: F) -> impl Parser<'a>
-where
-    P: Parser<'a>,
-    F: Fn(Value) -> P,
-{
-    move |source, position| -> Result<Success, Failure> {
-        let result = parser.parse(source, position);
-        if result.is_err() {
-            return result;
-        }
-        let next_parser = func(result.value());
-        return merge_results(next_parser.parse(source, result.position()), result);
-    }
-}
-
 fn many<'a, P>(parser: P) -> impl Parser<'a>
 where
     P: Parser<'a>,
