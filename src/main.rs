@@ -168,15 +168,14 @@ where
         let mut acc: Vec<Value> = Vec::new();
         let src = Rc::new(source);
         let mut result: Result<Success, Failure> = parser.parse(&src, pos);
-        if result.is_ok() {
-            pos = result.position();
-            acc.push(result.value());
-        } else {
+        if result.is_err() {
             return Ok(Success {
                 position: pos,
                 value: Value::List(acc),
             });
         }
+        pos = result.position();
+        acc.push(result.value());
         loop {
             result = merge_results(parser.parse(&src, pos), result);
             if result.is_ok() {
@@ -349,8 +348,7 @@ where
         Value::List(val) => match val.first() {
             Some(v) => match v {
                 Value::None => Value::None,
-                Value::Some(string) => Value::Some(string.clone()),
-                Value::List(list) => Value::List(list.to_vec()),
+                other => other.clone(),
             },
             None => Value::None,
         },
@@ -398,8 +396,7 @@ where
         Value::List(val) => match val.last() {
             Some(v) => match v {
                 Value::None => Value::None,
-                Value::Some(string) => Value::Some(string.clone()),
-                Value::List(list) => Value::List(list.to_vec()),
+                other => other.clone(),
             },
             None => Value::None,
         },
