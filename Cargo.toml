@@ -1,5 +1,5 @@
 [package]
-name = "placc"
+name = "pcc"
 version = "0.1.0"
 authors = ["plavelo <plastic.velocity@gmail.com>"]
 edition = "2018"

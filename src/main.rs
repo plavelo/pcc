@@ -124,9 +124,10 @@ where
     })
 }
 
-fn alt<'a, P>(parsers: Vec<P>) -> impl Parser<'a>
+fn or<'a, P1, P2>(parser1: P1, parser2: P2) -> impl Parser<'a>
 where
-    P: Parser<'a>,
+    P1: Parser<'a>,
+    P2: Parser<'a>,
 {
     move |source: &'a str, position| -> Result<Success, Failure> {
         let mut result: Result<Success, Failure> = Ok(Success {
@@ -134,13 +135,11 @@ where
             value: Value::None,
         });
         let src = Rc::new(source);
-        for parser in &parsers {
-            result = merge_results(parser.parse(&src, position), result);
-            if result.is_ok() {
-                return result;
-            }
+        result = merge_results(parser1.parse(&src, position), result);
+        if result.is_ok() {
+            return result;
         }
-        return result;
+        return merge_results(parser2.parse(&src, position), result);
     }
 }
 
@@ -221,9 +220,10 @@ fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a> {
     }
 }
 
-fn sep_by<'a, P>(parser: P, separator: P) -> impl Parser<'a>
+fn sep_by<'a, P, S>(parser: P, separator: S) -> impl Parser<'a>
 where
     P: Parser<'a>,
+    S: Parser<'a>,
 {
     move |source: &'a str, position| -> Result<Success, Failure> {
         let mut pos = position;
@@ -258,9 +258,10 @@ where
     }
 }
 
-fn sep_by1<'a, P>(parser: P, separator: P) -> impl Parser<'a>
+fn sep_by1<'a, P, S>(parser: P, separator: S) -> impl Parser<'a>
 where
     P: Parser<'a>,
+    S: Parser<'a>,
 {
     move |source: &'a str, position| -> Result<Success, Failure> {
         let mut pos = position;
@@ -295,9 +296,10 @@ where
     }
 }
 
-fn seq<'a, P>(parsers: Vec<P>) -> impl Parser<'a>
+fn and<'a, A, B>(parser1: A, parser2: B) -> impl Parser<'a>
 where
-    P: Parser<'a>,
+    A: Parser<'a>,
+    B: Parser<'a>,
 {
     move |source: &'a str, position| -> Result<Success, Failure> {
         let mut result: Result<Success, Failure> = Ok(Success {
@@ -307,14 +309,21 @@ where
         let mut pos = position;
         let mut acc: Vec<Value> = Vec::new();
         let src = Rc::new(source);
-        for parser in &parsers {
-            result = merge_results(parser.parse(&src, pos), result);
-            if result.is_err() {
-                return result;
-            }
-            pos = result.position();
-            acc.push(result.value())
+
+        result = merge_results(parser1.parse(&src, pos), result);
+        if result.is_err() {
+            return result;
         }
+        pos = result.position();
+        acc.push(result.value());
+
+        result = merge_results(parser2.parse(&src, pos), result);
+        if result.is_err() {
+            return result;
+        }
+        pos = result.position();
+        acc.push(result.value());
+
         return merge_results(
             Ok(Success {
                 position: pos,
@@ -325,11 +334,12 @@ where
     }
 }
 
-fn skip<'a, P>(first: P, second: P) -> impl Parser<'a>
+fn skip<'a, P1, P2>(first: P1, second: P2) -> impl Parser<'a>
 where
-    P: Parser<'a>,
+    P1: Parser<'a>,
+    P2: Parser<'a>,
 {
-    map(seq(vec![first, second]), move |value: Value| match value {
+    map(and(first, second), move |value: Value| match value {
         Value::List(val) => match val.first() {
             Some(v) => match v {
                 Value::None => Value::None,
@@ -373,11 +383,12 @@ fn string<'a>(string: &'a str) -> impl Parser<'a> {
     }
 }
 
-fn then<'a, P>(first: P, second: P) -> impl Parser<'a>
+fn then<'a, P1, P2>(first: P1, second: P2) -> impl Parser<'a>
 where
-    P: Parser<'a>,
+    P1: Parser<'a>,
+    P2: Parser<'a>,
 {
-    map(seq(vec![first, second]), move |value: Value| match value {
+    map(and(first, second), move |value: Value| match value {
         Value::List(val) => match val.last() {
             Some(v) => match v {
                 Value::None => Value::None,
@@ -395,14 +406,14 @@ mod tests {
 
     #[test]
     fn alt_ok() {
-        let parser = alt(vec![string("x"), string("y"), string("z")]);
+        let parser = or(or(string("x"), string("y")), string("z"));
         let result = parse(parser, "x");
         assert_eq!(result.is_ok(), true);
     }
 
     #[test]
     fn alt_error() {
-        let parser = alt(vec![string("x"), string("y"), string("z")]);
+        let parser = or(or(string("x"), string("y")), string("z"));
         let result = parse(parser, "x");
         assert_eq!(result.is_ok(), true);
     }
@@ -487,7 +498,7 @@ mod tests {
 
     #[test]
     fn seq_ok() {
-        let parser = seq(vec![string("key"), string(":"), string("value")]);
+        let parser = and(and(string("key"), string(":")), string("value"));
         let result = parse(parser, "key:value");
         assert_eq!(result.is_ok(), true);
     }
