@@ -63,6 +63,7 @@ impl Reply for Result<Success, Failure> {
     }
 }
 
+#[must_use]
 fn merge_results(
     curr: Result<Success, Failure>,
     last: Result<Success, Failure>,
@@ -84,7 +85,7 @@ fn merge_results(
     if curr.err_position() > last.err_position() {
         return curr;
     }
-    return last;
+    last
 }
 
 trait Parser<'a> {
@@ -139,7 +140,7 @@ where
         if result.is_ok() {
             return result;
         }
-        return merge_results(parser2.parse(&src, position), result);
+        merge_results(parser2.parse(&src, position), result)
     }
 }
 
@@ -248,13 +249,13 @@ where
                 break;
             }
         }
-        return merge_results(
+        merge_results(
             Ok(Success {
                 position: pos,
                 value: Value::List(acc),
             }),
             result,
-        );
+        )
     }
 }
 
@@ -286,13 +287,13 @@ where
                 break;
             }
         }
-        return merge_results(
+        merge_results(
             Ok(Success {
                 position: pos,
                 value: Value::List(acc),
             }),
             result,
-        );
+        )
     }
 }
 
@@ -324,13 +325,13 @@ where
         pos = result.position();
         acc.push(result.value());
 
-        return merge_results(
+        merge_results(
             Ok(Success {
                 position: pos,
                 value: Value::List(acc),
             }),
             result,
-        );
+        )
     }
 }
 
@@ -361,7 +362,7 @@ fn string<'a>(string: &'a str) -> impl Parser<'a> {
             });
         }
         let head = source.get(position as usize..to as usize);
-        return match head {
+        match head {
             Some(s) => {
                 if s == string {
                     Ok(Success {
@@ -379,7 +380,7 @@ fn string<'a>(string: &'a str) -> impl Parser<'a> {
                 position: position,
                 expected: vec![string.to_string()],
             }),
-        };
+        }
     }
 }
 
