@@ -160,7 +160,7 @@ where
         if result.is_ok() {
             return result;
         }
-        merge_results(parser2.parse(&source, result.position()), result)
+        merge_results(parser2.parse(&source, position), result)
     }
 }
 
@@ -246,8 +246,8 @@ where
         let mut result = parser.parse(&source, pos);
         if result.is_err() {
             return Ok(Success {
-                position: result.position(),
-                value: Value::List(acc),
+                position: position,
+                value: Value::List(vec![]),
             });
         }
         loop {
