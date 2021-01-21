@@ -204,16 +204,17 @@ fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a> {
     move |source: &'a str, position: i32| -> Result<Success, Failure> {
         let src = &source[position as usize..source.len()];
         let regex = Regex::new(pattern).unwrap();
-        let caps = regex.captures(src).unwrap();
-        if group <= caps.len() + 1 {
-            let text = caps.get(group).unwrap().as_str();
-            let mat = regex.find(src).unwrap();
-            Ok(Success {
-                position: position + (mat.end() - mat.start()) as i32,
-                value: Value::Some(text.to_string()),
-            })
-        } else {
-            Err(Failure {
+        let captures = regex.captures(src);
+        match captures {
+            Some(caps) => {
+                let text = caps.get(group).unwrap().as_str();
+                let mat = regex.find(src).unwrap();
+                Ok(Success {
+                    position: position + (mat.end() - mat.start()) as i32,
+                    value: Value::Some(text.to_string()),
+                })
+            }
+            None => Err(Failure {
                 position: position,
                 expected: vec![pattern.to_string()],
             })
@@ -532,5 +533,88 @@ mod tests {
         let result = parse(parser, "xy");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.unwrap().value, Value::Some("y".to_string()));
+    }
+
+    #[test]
+    fn json_ok() {
+        fn json_boolean<'a>() -> impl Parser<'a> {
+            or(string("true"), string("false"))
+        }
+        assert_eq!(json_boolean().parse("true", 0).is_ok(), true);
+        assert_eq!(json_boolean().parse("false", 0).is_ok(), true);
+
+        fn json_number<'a>() -> impl Parser<'a> {
+            regex("-?(0|[1-9][0-9]+)", 0)
+        }
+        assert_eq!(json_number().parse("-123", 0).is_ok(), true);
+        assert_eq!(json_number().parse("1230", 0).is_ok(), true);
+
+        fn json_string<'a>() -> impl Parser<'a> {
+            regex("\"(.*?)\"", 1)
+        }
+        assert_eq!(json_string().parse("\"foobar\"", 0).is_ok(), true);
+        assert_eq!(json_string().parse("\"\"", 0).is_ok(), true);
+
+        fn json_array<'a>() -> impl Parser<'a> {
+            skip(
+                then(
+                    string("["),
+                    sep_by(json_elements(), string(",")),
+                ),
+                string("]"),
+            )
+        }
+        assert_eq!(json_array().parse("[\"foo\",\"bar\"]", 0).is_ok(), true);
+        assert_eq!(json_array().parse("[123,456,789]", 0).is_ok(), true);
+
+        fn json_pair<'a>() -> impl Parser<'a> {
+            and(
+                skip(
+                    json_string(),
+                    string(":"),
+                ),
+                json_elements(),
+            )
+        }
+        assert_eq!(json_pair().parse("\"key\":\"value\"", 0).is_ok(), true);
+        assert_eq!(json_pair().parse("\"key\":123", 0).is_ok(), true);
+
+        fn json_object<'a>() -> impl Parser<'a> {
+            skip(
+                then(
+                    string("{"),
+                    sep_by(json_pair(), string(",")),
+                ),
+                string("}"),
+            )
+        }
+        assert_eq!(json_object().parse("{\"key\":\"value\",\"key\":123}", 0).is_ok(), true);
+
+        struct JsonElements;
+        impl<'a> Parser<'a> for JsonElements {
+            fn parse(&self, input: &'a str, position: i32) -> Result<Success, Failure> {
+                or(
+                    json_object(),
+                    or(json_array(), or(json_string(), or(json_number(), json_boolean()))),
+                ).parse(input, position)
+            }
+        }
+        fn json_elements<'a>() -> impl Parser<'a> {
+            JsonElements
+        }
+        assert_eq!(json_elements().parse("true", 0).is_ok(), true);
+        assert_eq!(json_elements().parse("false", 0).is_ok(), true);
+        assert_eq!(json_elements().parse("-123", 0).is_ok(), true);
+        assert_eq!(json_elements().parse("1230", 0).is_ok(), true);
+        assert_eq!(json_elements().parse("\"foobar\"", 0).is_ok(), true);
+        assert_eq!(json_elements().parse("\"\"", 0).is_ok(), true);
+        assert_eq!(json_elements().parse("[\"foo\",\"bar\"]", 0).is_ok(), true);
+        assert_eq!(json_elements().parse("[123,456,789]", 0).is_ok(), true);
+        assert_eq!(json_elements().parse("\"key\":\"value\"", 0).is_ok(), true);
+        assert_eq!(json_elements().parse("\"key\":123", 0).is_ok(), true);
+        assert_eq!(json_elements().parse("{\"key\":\"value\",\"key\":123}", 0).is_ok(), true);
+
+        let result = json_elements().parse("{\"key\":12345}", 0).value();
+        println!("hoge");
     }
 }
