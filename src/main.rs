@@ -1,7 +1,6 @@
 extern crate regex;
 
 use regex::Regex;
-use std::rc::Rc;
 
 fn main() {
     println!("Hello, world!");
@@ -68,9 +67,6 @@ fn merge_results(
     curr: Result<Success, Failure>,
     last: Result<Success, Failure>,
 ) -> Result<Success, Failure> {
-    if last.position() == -1 {
-        return curr;
-    }
     if curr.is_ok() {
         return curr;
     }
@@ -131,16 +127,11 @@ where
     P2: Parser<'a>,
 {
     move |source: &'a str, position| -> Result<Success, Failure> {
-        let mut result: Result<Success, Failure> = Ok(Success {
-            position: -1,
-            value: Value::None,
-        });
-        let src = Rc::new(source);
-        result = merge_results(parser1.parse(&src, position), result);
+        let result = parser1.parse(&source, position);
         if result.is_ok() {
             return result;
         }
-        merge_results(parser2.parse(&src, position), result)
+        merge_results(parser2.parse(&source, position), result)
     }
 }
 
@@ -151,8 +142,7 @@ where
     move |source: &'a str, position| -> Result<Success, Failure> {
         let mut pos = position;
         let mut acc: Vec<Value> = Vec::new();
-        let src = Rc::new(source);
-        let mut result: Result<Success, Failure> = parser.parse(&src, pos);
+        let mut result = parser.parse(&source, pos);
         if result.is_err() {
             return Ok(Success {
                 position: pos,
@@ -162,19 +152,16 @@ where
         pos = result.position();
         acc.push(result.value());
         loop {
-            result = merge_results(parser.parse(&src, pos), result);
+            result = merge_results(parser.parse(&source, pos), result);
             if result.is_ok() {
                 pos = result.position();
                 acc.push(result.value());
                 continue;
             }
-            return merge_results(
-                Ok(Success {
-                    position: pos,
-                    value: Value::List(acc),
-                }),
-                result,
-            );
+            return Ok(Success {
+                position: pos,
+                value: Value::List(acc),
+            });
         }
     }
 }
@@ -187,13 +174,10 @@ where
     move |source, position| -> Result<Success, Failure> {
         let result = parser.parse(source, position);
         if result.is_ok() {
-            merge_results(
-                Ok(Success {
-                    position: result.position(),
-                    value: func(result.value()),
-                }),
-                result,
-            )
+            Ok(Success {
+                position: result.position(),
+                value: func(result.value()),
+            })
         } else {
             result
         }
@@ -230,8 +214,7 @@ where
     move |source: &'a str, position| -> Result<Success, Failure> {
         let mut pos = position;
         let mut acc: Vec<Value> = Vec::new();
-        let src = Rc::new(source);
-        let mut result = parser.parse(&src, pos);
+        let mut result = parser.parse(&source, pos);
         if result.is_err() {
             return Ok(Success {
                 position: result.position(),
@@ -241,11 +224,11 @@ where
         loop {
             pos = result.position();
             acc.push(result.value());
-            result = merge_results(separator.parse(&src, pos), result);
+            result = merge_results(separator.parse(&source, pos), result);
             if result.is_err() {
                 break;
             }
-            result = merge_results(parser.parse(&src, result.position()), result);
+            result = merge_results(parser.parse(&source, result.position()), result);
             if result.is_err() {
                 break;
             }
@@ -268,8 +251,7 @@ where
     move |source: &'a str, position| -> Result<Success, Failure> {
         let mut pos = position;
         let mut acc: Vec<Value> = Vec::new();
-        let src = Rc::new(source);
-        let mut result = parser.parse(&src, pos);
+        let mut result = parser.parse(&source, pos);
         if result.is_err() {
             return Err(Failure {
                 position: position,
@@ -279,11 +261,11 @@ where
         loop {
             pos = result.position();
             acc.push(result.value());
-            result = merge_results(separator.parse(&src, pos), result);
+            result = merge_results(separator.parse(&source, pos), result);
             if result.is_err() {
                 break;
             }
-            result = merge_results(parser.parse(&src, result.position()), result);
+            result = merge_results(parser.parse(&source, result.position()), result);
             if result.is_err() {
                 break;
             }
@@ -304,35 +286,26 @@ where
     B: Parser<'a>,
 {
     move |source: &'a str, position| -> Result<Success, Failure> {
-        let mut result: Result<Success, Failure> = Ok(Success {
-            position: -1,
-            value: Value::None,
-        });
         let mut pos = position;
         let mut acc: Vec<Value> = Vec::new();
-        let src = Rc::new(source);
-
-        result = merge_results(parser1.parse(&src, pos), result);
+        let mut result = parser1.parse(&source, pos);
         if result.is_err() {
             return result;
         }
         pos = result.position();
         acc.push(result.value());
 
-        result = merge_results(parser2.parse(&src, pos), result);
+        result = merge_results(parser2.parse(&source, pos), result);
         if result.is_err() {
             return result;
         }
         pos = result.position();
         acc.push(result.value());
 
-        merge_results(
-            Ok(Success {
-                position: pos,
-                value: Value::List(acc),
-            }),
-            result,
-        )
+        Ok(Success {
+            position: pos,
+            value: Value::List(acc),
+        })
     }
 }
 
