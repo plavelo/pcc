@@ -513,20 +513,38 @@ mod tests {
         fn json_boolean<'a>() -> impl Parser<'a> {
             or(string("true"), string("false"))
         }
-        assert_eq!(json_boolean().parse("true", 0).is_ok(), true);
-        assert_eq!(json_boolean().parse("false", 0).is_ok(), true);
+
+        let result = json_boolean().parse("true", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("true".to_string()));
+
+        let result = json_boolean().parse("false", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("false".to_string()));
 
         fn json_number<'a>() -> impl Parser<'a> {
             regex("-?(0|[1-9][0-9]+)", 0)
         }
-        assert_eq!(json_number().parse("-123", 0).is_ok(), true);
-        assert_eq!(json_number().parse("1230", 0).is_ok(), true);
+
+        let result = json_number().parse("-123", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("-123".to_string()));
+
+        let result = json_number().parse("1230", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("1230".to_string()));
 
         fn json_string<'a>() -> impl Parser<'a> {
             regex("\"(.*?)\"", 1)
         }
-        assert_eq!(json_string().parse("\"foobar\"", 0).is_ok(), true);
-        assert_eq!(json_string().parse("\"\"", 0).is_ok(), true);
+
+        let result = json_string().parse("\"foobar\"", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("foobar".to_string()));
+
+        let result = json_string().parse("\"\"", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("".to_string()));
 
         fn json_array<'a>() -> impl Parser<'a> {
             skip(
@@ -537,8 +555,27 @@ mod tests {
                 string("]"),
             )
         }
-        assert_eq!(json_array().parse("[\"foo\",\"bar\"]", 0).is_ok(), true);
-        assert_eq!(json_array().parse("[123,456,789]", 0).is_ok(), true);
+
+        let result = json_array().parse("[\"foo\",\"bar\"]", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("foo".to_string()),
+                Value::Some("bar".to_string()),
+            ]),
+        );
+
+        let result = json_array().parse("[123,456,789]", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("123".to_string()),
+                Value::Some("456".to_string()),
+                Value::Some("789".to_string()),
+            ]),
+        );
 
         fn json_pair<'a>() -> impl Parser<'a> {
             and(
@@ -549,8 +586,26 @@ mod tests {
                 json_elements(),
             )
         }
-        assert_eq!(json_pair().parse("\"key\":\"value\"", 0).is_ok(), true);
-        assert_eq!(json_pair().parse("\"key\":123", 0).is_ok(), true);
+
+        let result = json_pair().parse("\"key\":\"value\"", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("key".to_string()),
+                Value::Some("value".to_string()),
+            ]),
+        );
+
+        let result = json_pair().parse("\"key\":123", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("key".to_string()),
+                Value::Some("123".to_string()),
+            ]),
+        );
 
         fn json_object<'a>() -> impl Parser<'a> {
             skip(
@@ -561,7 +616,22 @@ mod tests {
                 string("}"),
             )
         }
-        assert_eq!(json_object().parse("{\"key\":\"value\",\"key\":123}", 0).is_ok(), true);
+
+        let result = json_object().parse("{\"key\":\"value\",\"key\":123}", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::List(vec![
+                    Value::Some("key".to_string()),
+                    Value::Some("value".to_string()),
+                ]),
+                Value::List(vec![
+                    Value::Some("key".to_string()),
+                    Value::Some("123".to_string()),
+                ]),
+            ]),
+        );
 
         struct JsonElements;
         impl<'a> Parser<'a> for JsonElements {
@@ -575,19 +645,95 @@ mod tests {
         fn json_elements<'a>() -> impl Parser<'a> {
             JsonElements
         }
-        assert_eq!(json_elements().parse("true", 0).is_ok(), true);
-        assert_eq!(json_elements().parse("false", 0).is_ok(), true);
-        assert_eq!(json_elements().parse("-123", 0).is_ok(), true);
-        assert_eq!(json_elements().parse("1230", 0).is_ok(), true);
-        assert_eq!(json_elements().parse("\"foobar\"", 0).is_ok(), true);
-        assert_eq!(json_elements().parse("\"\"", 0).is_ok(), true);
-        assert_eq!(json_elements().parse("[\"foo\",\"bar\"]", 0).is_ok(), true);
-        assert_eq!(json_elements().parse("[123,456,789]", 0).is_ok(), true);
-        assert_eq!(json_elements().parse("\"key\":\"value\"", 0).is_ok(), true);
-        assert_eq!(json_elements().parse("\"key\":123", 0).is_ok(), true);
-        assert_eq!(json_elements().parse("{\"key\":\"value\",\"key\":123}", 0).is_ok(), true);
 
-        let result = json_elements().parse("{\"key\":12345}", 0).value();
-        println!("hoge");
+        let result = json_elements().parse("true", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("true".to_string()));
+
+        let result = json_elements().parse("false", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("false".to_string()));
+
+        let result = json_elements().parse("-123", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("-123".to_string()));
+
+        let result = json_elements().parse("1230", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("1230".to_string()));
+
+        let result = json_elements().parse("\"foobar\"", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("foobar".to_string()));
+
+        let result = json_elements().parse("\"\"", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("".to_string()));
+
+        let result = json_elements().parse("[\"foo\",\"bar\"]", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("foo".to_string()),
+                Value::Some("bar".to_string()),
+            ]),
+        );
+
+        let result = json_elements().parse("[123,456,789]", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("123".to_string()),
+                Value::Some("456".to_string()),
+                Value::Some("789".to_string()),
+            ]),
+        );
+
+        let result = json_elements().parse("{\"key\":\"value\",\"key\":123}", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::List(vec![
+                    Value::Some("key".to_string()),
+                    Value::Some("value".to_string()),
+                ]),
+                Value::List(vec![
+                    Value::Some("key".to_string()),
+                    Value::Some("123".to_string()),
+                ]),
+            ]),
+        );
+
+        let result = json_elements().parse("{\"arr\":[123,456,789],\"obj\":{\"key\":\"value\",\"key\":123}}", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::List(vec![
+                    Value::Some("arr".to_string()),
+                    Value::List(vec![
+                        Value::Some("123".to_string()),
+                        Value::Some("456".to_string()),
+                        Value::Some("789".to_string()),
+                    ]),
+                ]),
+                Value::List(vec![
+                    Value::Some("obj".to_string()),
+                    Value::List(vec![
+                        Value::List(vec![
+                            Value::Some("key".to_string()),
+                            Value::Some("value".to_string()),
+                        ]),
+                        Value::List(vec![
+                            Value::Some("key".to_string()),
+                            Value::Some("123".to_string()),
+                        ]),
+                    ]),
+                ]),
+            ]),
+        );
     }
 }
