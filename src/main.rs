@@ -121,6 +121,35 @@ where
     })
 }
 
+fn and<'a, A, B>(parser1: A, parser2: B) -> impl Parser<'a>
+where
+    A: Parser<'a>,
+    B: Parser<'a>,
+{
+    move |source: &'a str, position| -> Result<Success, Failure> {
+        let mut pos = position;
+        let mut acc: Vec<Value> = Vec::new();
+        let mut result = parser1.parse(&source, pos);
+        if result.is_err() {
+            return result;
+        }
+        pos = result.position();
+        acc.push(result.value());
+
+        result = merge_results(parser2.parse(&source, pos), result);
+        if result.is_err() {
+            return result;
+        }
+        pos = result.position();
+        acc.push(result.value());
+
+        Ok(Success {
+            position: pos,
+            value: Value::List(acc),
+        })
+    }
+}
+
 fn or<'a, P1, P2>(parser1: P1, parser2: P2) -> impl Parser<'a>
 where
     P1: Parser<'a>,
@@ -131,7 +160,7 @@ where
         if result.is_ok() {
             return result;
         }
-        merge_results(parser2.parse(&source, position), result)
+        merge_results(parser2.parse(&source, result.position()), result)
     }
 }
 
@@ -233,13 +262,10 @@ where
                 break;
             }
         }
-        merge_results(
-            Ok(Success {
-                position: pos,
-                value: Value::List(acc),
-            }),
-            result,
-        )
+        Ok(Success {
+            position: pos,
+            value: Value::List(acc),
+        })
     }
 }
 
@@ -270,38 +296,6 @@ where
                 break;
             }
         }
-        merge_results(
-            Ok(Success {
-                position: pos,
-                value: Value::List(acc),
-            }),
-            result,
-        )
-    }
-}
-
-fn and<'a, A, B>(parser1: A, parser2: B) -> impl Parser<'a>
-where
-    A: Parser<'a>,
-    B: Parser<'a>,
-{
-    move |source: &'a str, position| -> Result<Success, Failure> {
-        let mut pos = position;
-        let mut acc: Vec<Value> = Vec::new();
-        let mut result = parser1.parse(&source, pos);
-        if result.is_err() {
-            return result;
-        }
-        pos = result.position();
-        acc.push(result.value());
-
-        result = merge_results(parser2.parse(&source, pos), result);
-        if result.is_err() {
-            return result;
-        }
-        pos = result.position();
-        acc.push(result.value());
-
         Ok(Success {
             position: pos,
             value: Value::List(acc),
@@ -380,24 +374,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn alt_ok() {
-        let parser = or(or(string("x"), string("y")), string("z"));
-        let result = parse(parser, "x");
+    fn and_ok() {
+        let parser = and(and(string("key"), string(":")), string("value"));
+        let result = parse(parser, "key:value");
         assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::List(vec![
+                    Value::Some("key".to_string()),
+                    Value::Some(":".to_string()),
+                ]),
+                Value::Some("value".to_string()),
+            ]),
+        );
     }
 
     #[test]
-    fn alt_error() {
+    fn or_ok() {
         let parser = or(or(string("x"), string("y")), string("z"));
         let result = parse(parser, "x");
         assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("x".to_string()));
+    }
+
+    #[test]
+    fn or_error() {
+        let parser = or(or(string("x"), string("y")), string("z"));
+        let result = parse(parser, "w");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.err_position(), 0);
     }
 
     #[test]
     fn many_ok() {
-        let parser = many(string("x"));
-        let result = parse(parser, "xxxxxx");
+        let parser = many(string("xy"));
+        let result = parse(parser, "xyxyxyxy");
         assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("xy".to_string()),
+                Value::Some("xy".to_string()),
+                Value::Some("xy".to_string()),
+                Value::Some("xy".to_string()),
+            ]),
+        );
     }
 
     #[test]
@@ -405,19 +427,20 @@ mod tests {
         let parser = many(string("x"));
         let result = parse(parser, "xxxxxy");
         assert_eq!(result.is_ok(), false);
+        assert_eq!(result.err_position(), 5);
     }
 
     #[test]
     fn regex_ok() {
-        let parser1 = regex(r"([0-9]+)([a-z]+)", 1);
-        let result1 = parse(parser1, "123abc");
-        assert_eq!(result1.is_ok(), true);
-        assert_eq!(result1.value(), Value::Some("123".to_string()));
+        let parser = regex(r"([0-9]+)([a-z]+)", 1);
+        let result = parse(parser, "123abc");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("123".to_string()));
 
-        let parser2 = regex(r"[0-9]+", 0);
-        let result2 = parse(parser2, "123");
-        assert_eq!(result2.is_ok(), true);
-        assert_eq!(result2.value(), Value::Some("123".to_string()));
+        let parser = regex(r"[0-9]+", 0);
+        let result = parse(parser, "123");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("123".to_string()));
     }
 
     #[test]
@@ -425,43 +448,79 @@ mod tests {
         let parser = regex(r"[0-9]+", 0);
         let result = parse(parser, "12a");
         assert_eq!(result.is_ok(), false);
+        assert_eq!(result.err_position(), 2);
     }
 
     #[test]
     fn sep_by1_ok() {
-        let parser1 = sep_by1(string("val"), string(","));
-        let result1 = parse(parser1, "val");
-        assert_eq!(result1.is_ok(), true);
+        let parser = sep_by1(string("val"), string(","));
+        let result = parse(parser, "val");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("val".to_string()),
+            ]),
+        );
 
-        let parser2 = sep_by1(string("val"), string(","));
-        let result2 = parse(parser2, "val,val,val");
-        assert_eq!(result2.is_ok(), true);
+        let parser = sep_by1(string("val"), string(","));
+        let result = parse(parser, "val,val,val");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("val".to_string()),
+                Value::Some("val".to_string()),
+                Value::Some("val".to_string()),
+            ]),
+        );
     }
 
     #[test]
     fn sep_by1_error() {
-        let parser1 = sep_by1(string("val"), string(","));
-        let result1 = parse(parser1, "");
-        assert_eq!(result1.is_ok(), false);
+        let parser = sep_by1(string("val"), string(","));
+        let result = parse(parser, "");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.err_position(), 0);
 
-        let parser2 = sep_by1(string("val"), string(","));
-        let result2 = parse(parser2, "val,");
-        assert_eq!(result2.is_ok(), false);
+        let parser = sep_by1(string("val"), string(","));
+        let result = parse(parser, "val,");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.err_position(), 3);
     }
 
     #[test]
     fn sep_by_ok() {
-        let parser1 = sep_by(string("val"), string(","));
-        let result1 = parse(parser1, "");
-        assert_eq!(result1.is_ok(), true);
+        let parser = sep_by(string("val"), string(","));
+        let result = parse(parser, "");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+            ]),
+        );
 
-        let parser2 = sep_by(string("val"), string(","));
-        let result2 = parse(parser2, "val");
-        assert_eq!(result2.is_ok(), true);
+        let parser = sep_by(string("val"), string(","));
+        let result = parse(parser, "val");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("val".to_string()),
+            ]),
+        );
 
-        let parser3 = sep_by(string("val"), string(","));
-        let result3 = parse(parser3, "val,val,val");
-        assert_eq!(result3.is_ok(), true);
+        let parser = sep_by(string("val"), string(","));
+        let result = parse(parser, "val,val,val");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("val".to_string()),
+                Value::Some("val".to_string()),
+                Value::Some("val".to_string()),
+            ]),
+        );
     }
 
     #[test]
@@ -469,13 +528,7 @@ mod tests {
         let parser = sep_by(string("val"), string(","));
         let result = parse(parser, "val,");
         assert_eq!(result.is_ok(), false);
-    }
-
-    #[test]
-    fn seq_ok() {
-        let parser = and(and(string("key"), string(":")), string("value"));
-        let result = parse(parser, "key:value");
-        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.err_position(), 3);
     }
 
     #[test]
@@ -491,6 +544,7 @@ mod tests {
         let parser = string("source");
         let result = parse(parser, "source");
         assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), Value::Some("source".to_string()));
     }
 
     #[test]
@@ -498,6 +552,7 @@ mod tests {
         let parser = string("source");
         let result = parse(parser, "other");
         assert_eq!(result.is_ok(), false);
+        assert_eq!(result.err_position(), 0);
     }
 
     #[test]
@@ -706,7 +761,23 @@ mod tests {
                 ]),
             ]),
         );
+        let result = json_elements().parse("{\"arr\":[123,456,789]}", 0);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::List(vec![
+                    Value::Some("arr".to_string()),
+                    Value::List(vec![
+                        Value::Some("123".to_string()),
+                        Value::Some("456".to_string()),
+                        Value::Some("789".to_string()),
+                    ]),
+                ]),
+            ]),
+        );
 
+        /*
         let result = json_elements().parse("{\"arr\":[123,456,789],\"obj\":{\"key\":\"value\",\"key\":123}}", 0);
         assert_eq!(result.is_ok(), true);
         assert_eq!(
@@ -735,5 +806,6 @@ mod tests {
                 ]),
             ]),
         );
+        */
     }
 }
