@@ -483,7 +483,7 @@ mod tests {
         let parser = skip(string("x"), string("y"));
         let result = parse(parser, "xy");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.unwrap().value, Value::Some("x".to_string()));
+        assert_eq!(result.value(), Value::Some("x".to_string()));
     }
 
     #[test]
@@ -505,7 +505,7 @@ mod tests {
         let parser = then(string("x"), string("y"));
         let result = parse(parser, "xy");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.unwrap().value, Value::Some("y".to_string()));
+        assert_eq!(result.value(), Value::Some("y".to_string()));
     }
 
     #[test]
