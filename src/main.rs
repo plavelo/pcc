@@ -606,7 +606,7 @@ mod tests {
         assert_eq!(result.value(), Value::Some("1230".to_string()));
 
         fn json_string<'a>() -> impl Parser<'a> {
-            regex("^\"(.*?)\"", 1)
+            regex("\"(.*?)\"", 1)
         }
 
         let result = parse(json_string(), "\"foobar\"");
