@@ -221,7 +221,7 @@ fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a> {
         match captures {
             Some(caps) => {
                 let text = caps.get(group).unwrap().as_str();
-                let mat = regex.find(src).unwrap();
+                let mat = caps.get(0).unwrap();
                 Ok(Success {
                     position: position + (mat.end() - mat.start()) as i32,
                     value: Value::Some(text.to_string()),
@@ -578,7 +578,7 @@ mod tests {
         assert_eq!(result.value(), Value::Some("false".to_string()));
 
         fn json_number<'a>() -> impl Parser<'a> {
-            regex("-?(0|[1-9][0-9]+)", 0)
+            regex("-?(0|[1-9][0-9]*)", 0)
         }
 
         let result = json_number().parse("-123", 0);
@@ -590,7 +590,7 @@ mod tests {
         assert_eq!(result.value(), Value::Some("1230".to_string()));
 
         fn json_string<'a>() -> impl Parser<'a> {
-            regex("\"(.*?)\"", 1)
+            regex("^\"(.*?)\"", 1)
         }
 
         let result = json_string().parse("\"foobar\"", 0);
@@ -777,7 +777,7 @@ mod tests {
             ]),
         );
 
-        /*
+        
         let result = json_elements().parse("{\"arr\":[123,456,789],\"obj\":{\"key\":\"value\",\"key\":123}}", 0);
         assert_eq!(result.is_ok(), true);
         assert_eq!(
@@ -806,6 +806,6 @@ mod tests {
                 ]),
             ]),
         );
-        */
+        
     }
 }
