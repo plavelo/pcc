@@ -227,7 +227,7 @@ fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a> {
             None => Err(Failure {
                 position: position,
                 expected: vec![pattern.to_string()],
-            })
+            }),
         }
     }
 }
@@ -417,10 +417,7 @@ mod tests {
         let parser = many(string("xy"));
         let result = parse(parser, "");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(
-            result.value(),
-            Value::None,
-        );
+        assert_eq!(result.value(), Value::None);
     }
 
     #[test]
@@ -459,9 +456,7 @@ mod tests {
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("val".to_string()),
-            ]),
+            Value::List(vec![Value::Some("val".to_string())]),
         );
 
         let parser = sep_by1(string("val"), string(","));
@@ -495,19 +490,14 @@ mod tests {
         let parser = sep_by(string("val"), string(","));
         let result = parse(parser, "");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(
-            result.value(),
-            Value::None,
-        );
+        assert_eq!(result.value(), Value::None);
 
         let parser = sep_by(string("val"), string(","));
         let result = parse(parser, "val");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("val".to_string()),
-            ]),
+            Value::List(vec![Value::Some("val".to_string())]),
         );
 
         let parser = sep_by(string("val"), string(","));
@@ -619,10 +609,7 @@ mod tests {
 
         fn json_array<'a>() -> impl Parser<'a> {
             skip(
-                then(
-                    string("["),
-                    sep_by(json_elements(), string(",")),
-                ),
+                then(string("["), sep_by(json_elements(), string(","))),
                 string("]"),
             )
         }
@@ -649,13 +636,7 @@ mod tests {
         );
 
         fn json_pair<'a>() -> impl Parser<'a> {
-            and(
-                skip(
-                    json_string(),
-                    string(":"),
-                ),
-                json_elements(),
-            )
+            and(skip(json_string(), string(":")), json_elements())
         }
 
         let result = parse(json_pair(), "\"key\":\"value\"");
@@ -694,10 +675,7 @@ mod tests {
 
         fn json_object<'a>() -> impl Parser<'a> {
             skip(
-                then(
-                    string("{"),
-                    sep_by(json_pair(), string(",")),
-                ),
+                then(string("{"), sep_by(json_pair(), string(","))),
                 string("}"),
             )
         }
@@ -743,17 +721,12 @@ mod tests {
             fn parse(&self, input: &'a str, position: i32) -> Result<Success, Failure> {
                 or(
                     or(
-                        or(
-                            or(
-                                json_object(),
-                                json_array(),
-                            ),
-                            json_string(),
-                        ),
+                        or(or(json_object(), json_array()), json_string()),
                         json_number(),
                     ),
                     json_boolean(),
-                ).parse(input, position)
+                )
+                .parse(input, position)
             }
         }
         fn json_elements<'a>() -> impl Parser<'a> {
@@ -824,19 +797,20 @@ mod tests {
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
+            Value::List(vec![Value::List(vec![
+                Value::Some("arr".to_string()),
                 Value::List(vec![
-                    Value::Some("arr".to_string()),
-                    Value::List(vec![
-                        Value::Some("123".to_string()),
-                        Value::Some("456".to_string()),
-                        Value::Some("789".to_string()),
-                    ]),
+                    Value::Some("123".to_string()),
+                    Value::Some("456".to_string()),
+                    Value::Some("789".to_string()),
                 ]),
-            ]),
+            ])]),
         );
 
-        let result = parse(json_elements(), "{\"arr\":[123,456,789],\"obj\":{\"key\":\"value\",\"key\":123}}");
+        let result = parse(
+            json_elements(),
+            "{\"arr\":[123,456,789],\"obj\":{\"key\":\"value\",\"key\":123}}",
+        );
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
