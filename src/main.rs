@@ -677,6 +677,20 @@ mod tests {
             ]),
         );
 
+        let result = parse(json_pair(), "\"key\":[123,456,789]");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::Some("key".to_string()),
+                Value::List(vec![
+                    Value::Some("123".to_string()),
+                    Value::Some("456".to_string()),
+                    Value::Some("789".to_string()),
+                ]),
+            ]),
+        );
+
         fn json_object<'a>() -> impl Parser<'a> {
             skip(
                 then(
