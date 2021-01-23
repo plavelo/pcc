@@ -218,7 +218,7 @@ fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a> {
         match captures {
             Some(caps) => {
                 let text = caps.get(group).unwrap().as_str();
-                let mat = regex.find(src).unwrap();
+                let mat = caps.get(0).unwrap();
                 Ok(Success {
                     position: position + (mat.end() - mat.start()) as i32,
                     value: Value::Some(text.to_string()),
@@ -594,7 +594,7 @@ mod tests {
         assert_eq!(result.value(), Value::Some("false".to_string()));
 
         fn json_number<'a>() -> impl Parser<'a> {
-            regex("-?(0|[1-9][0-9]+)", 0)
+            regex("-?(0|[1-9][0-9]*)", 0)
         }
 
         let result = parse(json_number(), "-123");
