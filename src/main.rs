@@ -719,7 +719,6 @@ mod tests {
         );
 
         let result = parse(json_object(), "{\"key1\":[123,456,789],\"key2\":\"value\"}");
-        assert_eq!(result.expected(), vec!["hoge"]);
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
