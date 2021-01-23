@@ -127,14 +127,12 @@ where
     B: Parser<'a>,
 {
     move |source: &'a str, position| -> Result<Success, Failure> {
-        let mut pos = position;
-        let mut acc: Vec<Value> = Vec::new();
-        let mut result = parser1.parse(&source, pos);
+        let mut result = parser1.parse(&source, position);
         if result.is_err() {
             return result;
         }
-        pos = result.position();
-        acc.push(result.value());
+        let mut pos = result.position();
+        let mut acc: Vec<Value> = vec![result.value()];
 
         result = merge_results(parser2.parse(&source, pos), result);
         if result.is_err() {
@@ -169,17 +167,15 @@ where
     P: Parser<'a>,
 {
     move |source: &'a str, position| -> Result<Success, Failure> {
-        let mut pos = position;
-        let mut acc: Vec<Value> = Vec::new();
-        let mut result = parser.parse(&source, pos);
+        let mut result = parser.parse(&source, position);
         if result.is_err() {
             return Ok(Success {
-                position: pos,
-                value: Value::List(acc),
+                position: position,
+                value: Value::None,
             });
         }
-        pos = result.position();
-        acc.push(result.value());
+        let mut pos = result.position();
+        let mut acc: Vec<Value> = vec![result.value()];
         loop {
             result = merge_results(parser.parse(&source, pos), result);
             if result.is_ok() {
@@ -241,15 +237,15 @@ where
     S: Parser<'a>,
 {
     move |source: &'a str, position| -> Result<Success, Failure> {
-        let mut pos = position;
-        let mut acc: Vec<Value> = Vec::new();
-        let mut result = parser.parse(&source, pos);
+        let mut result = parser.parse(&source, position);
         if result.is_err() {
             return Ok(Success {
                 position: position,
-                value: Value::List(vec![]),
+                value: Value::None,
             });
         }
+        let mut pos;
+        let mut acc: Vec<Value> = Vec::new();
         loop {
             pos = result.position();
             acc.push(result.value());
@@ -275,15 +271,15 @@ where
     S: Parser<'a>,
 {
     move |source: &'a str, position| -> Result<Success, Failure> {
-        let mut pos = position;
-        let mut acc: Vec<Value> = Vec::new();
-        let mut result = parser.parse(&source, pos);
+        let mut result = parser.parse(&source, position);
         if result.is_err() {
             return Err(Failure {
                 position: position,
                 expected: result.expected(),
             });
         }
+        let mut pos;
+        let mut acc: Vec<Value> = Vec::new();
         loop {
             pos = result.position();
             acc.push(result.value());
@@ -309,13 +305,7 @@ where
     P2: Parser<'a>,
 {
     map(and(first, second), move |value: Value| match value {
-        Value::List(val) => match val.first() {
-            Some(v) => match v {
-                Value::None => Value::None,
-                other => other.clone(),
-            },
-            None => Value::None,
-        },
+        Value::List(val) => val.first().unwrap().clone(),
         _ => panic!(),
     })
 }
@@ -358,13 +348,7 @@ where
     P2: Parser<'a>,
 {
     map(and(first, second), move |value: Value| match value {
-        Value::List(val) => match val.last() {
-            Some(v) => match v {
-                Value::None => Value::None,
-                other => other.clone(),
-            },
-            None => Value::None,
-        },
+        Value::List(val) => val.last().unwrap().clone(),
         _ => panic!(),
     })
 }
@@ -388,6 +372,14 @@ mod tests {
                 Value::Some("value".to_string()),
             ]),
         );
+    }
+
+    #[test]
+    fn and_error() {
+        let parser = and(and(string("key"), string(":")), string("value"));
+        let result = parse(parser, "key:valu");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.err_position(), 4);
     }
 
     #[test]
@@ -419,6 +411,14 @@ mod tests {
                 Value::Some("xy".to_string()),
                 Value::Some("xy".to_string()),
             ]),
+        );
+
+        let parser = many(string("xy"));
+        let result = parse(parser, "");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::None,
         );
     }
 
@@ -496,8 +496,7 @@ mod tests {
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-            ]),
+            Value::None,
         );
 
         let parser = sep_by(string("val"), string(","));
@@ -540,6 +539,14 @@ mod tests {
     }
 
     #[test]
+    fn skip_error() {
+        let parser = skip(string("xxx"), string("yyy"));
+        let result = parse(parser, "xxxxyy");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.err_position(), 3);
+    }
+
+    #[test]
     fn string_ok() {
         let parser = string("source");
         let result = parse(parser, "source");
@@ -564,16 +571,24 @@ mod tests {
     }
 
     #[test]
+    fn then_error() {
+        let parser = then(string("xxx"), string("yyy"));
+        let result = parse(parser, "xxxxyy");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.err_position(), 3);
+    }
+
+    #[test]
     fn json_ok() {
         fn json_boolean<'a>() -> impl Parser<'a> {
             or(string("true"), string("false"))
         }
 
-        let result = json_boolean().parse("true", 0);
+        let result = parse(json_boolean(), "true");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("true".to_string()));
 
-        let result = json_boolean().parse("false", 0);
+        let result = parse(json_boolean(), "false");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("false".to_string()));
 
@@ -581,11 +596,11 @@ mod tests {
             regex("-?(0|[1-9][0-9]+)", 0)
         }
 
-        let result = json_number().parse("-123", 0);
+        let result = parse(json_number(), "-123");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("-123".to_string()));
 
-        let result = json_number().parse("1230", 0);
+        let result = parse(json_number(), "1230");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("1230".to_string()));
 
@@ -593,11 +608,11 @@ mod tests {
             regex("\"(.*?)\"", 1)
         }
 
-        let result = json_string().parse("\"foobar\"", 0);
+        let result = parse(json_string(), "\"foobar\"");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("foobar".to_string()));
 
-        let result = json_string().parse("\"\"", 0);
+        let result = parse(json_string(), "\"\"");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("".to_string()));
 
@@ -611,7 +626,7 @@ mod tests {
             )
         }
 
-        let result = json_array().parse("[\"foo\",\"bar\"]", 0);
+        let result = parse(json_array(), "[\"foo\",\"bar\"]");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
@@ -621,7 +636,7 @@ mod tests {
             ]),
         );
 
-        let result = json_array().parse("[123,456,789]", 0);
+        let result = parse(json_array(), "[123,456,789]");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
@@ -642,7 +657,7 @@ mod tests {
             )
         }
 
-        let result = json_pair().parse("\"key\":\"value\"", 0);
+        let result = parse(json_pair(), "\"key\":\"value\"");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
@@ -652,7 +667,7 @@ mod tests {
             ]),
         );
 
-        let result = json_pair().parse("\"key\":123", 0);
+        let result = parse(json_pair(), "\"key\":123");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
@@ -672,18 +687,39 @@ mod tests {
             )
         }
 
-        let result = json_object().parse("{\"key\":\"value\",\"key\":123}", 0);
+        let result = parse(json_object(), "{\"key1\":\"value\",\"key2\":123}");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
             Value::List(vec![
                 Value::List(vec![
-                    Value::Some("key".to_string()),
+                    Value::Some("key1".to_string()),
                     Value::Some("value".to_string()),
                 ]),
                 Value::List(vec![
-                    Value::Some("key".to_string()),
+                    Value::Some("key2".to_string()),
                     Value::Some("123".to_string()),
+                ]),
+            ]),
+        );
+
+        let result = parse(json_object(), "{\"key1\":[123,456,789],\"key2\":\"value\"}");
+        assert_eq!(result.expected(), vec!["hoge"]);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            Value::List(vec![
+                Value::List(vec![
+                    Value::Some("key1".to_string()),
+                    Value::List(vec![
+                        Value::Some("123".to_string()),
+                        Value::Some("456".to_string()),
+                        Value::Some("789".to_string()),
+                    ]),
+                ]),
+                Value::List(vec![
+                    Value::Some("key2".to_string()),
+                    Value::Some("value".to_string()),
                 ]),
             ]),
         );
@@ -692,8 +728,17 @@ mod tests {
         impl<'a> Parser<'a> for JsonElements {
             fn parse(&self, input: &'a str, position: i32) -> Result<Success, Failure> {
                 or(
-                    json_object(),
-                    or(json_array(), or(json_string(), or(json_number(), json_boolean()))),
+                    or(
+                        or(
+                            or(
+                                json_object(),
+                                json_array(),
+                            ),
+                            json_string(),
+                        ),
+                        json_number(),
+                    ),
+                    json_boolean(),
                 ).parse(input, position)
             }
         }
@@ -701,31 +746,31 @@ mod tests {
             JsonElements
         }
 
-        let result = json_elements().parse("true", 0);
+        let result = parse(json_elements(), "true");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("true".to_string()));
 
-        let result = json_elements().parse("false", 0);
+        let result = parse(json_elements(), "false");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("false".to_string()));
 
-        let result = json_elements().parse("-123", 0);
+        let result = parse(json_elements(), "-123");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("-123".to_string()));
 
-        let result = json_elements().parse("1230", 0);
+        let result = parse(json_elements(), "1230");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("1230".to_string()));
 
-        let result = json_elements().parse("\"foobar\"", 0);
+        let result = parse(json_elements(), "\"foobar\"");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("foobar".to_string()));
 
-        let result = json_elements().parse("\"\"", 0);
+        let result = parse(json_elements(), "\"\"");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), Value::Some("".to_string()));
 
-        let result = json_elements().parse("[\"foo\",\"bar\"]", 0);
+        let result = parse(json_elements(), "[\"foo\",\"bar\"]");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
@@ -735,7 +780,7 @@ mod tests {
             ]),
         );
 
-        let result = json_elements().parse("[123,456,789]", 0);
+        let result = parse(json_elements(), "[123,456,789]");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
@@ -746,7 +791,7 @@ mod tests {
             ]),
         );
 
-        let result = json_elements().parse("{\"key\":\"value\",\"key\":123}", 0);
+        let result = parse(json_elements(), "{\"key\":\"value\",\"key\":123}");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
@@ -761,7 +806,7 @@ mod tests {
                 ]),
             ]),
         );
-        let result = json_elements().parse("{\"arr\":[123,456,789]}", 0);
+        let result = parse(json_elements(), "{\"arr\":[123,456,789]}");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
@@ -777,8 +822,7 @@ mod tests {
             ]),
         );
 
-        /*
-        let result = json_elements().parse("{\"arr\":[123,456,789],\"obj\":{\"key\":\"value\",\"key\":123}}", 0);
+        let result = parse(json_elements(), "{\"arr\":[123,456,789],\"obj\":{\"key\":\"value\",\"key\":123}}");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
@@ -806,6 +850,5 @@ mod tests {
                 ]),
             ]),
         );
-        */
     }
 }
