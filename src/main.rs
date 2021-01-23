@@ -837,7 +837,7 @@ mod tests {
         );
 
         
-        let result = json_elements().parse("{\"arr\":[123,456,789],\"obj\":{\"key\":\"value\",\"key\":123}}", 0);
+        let result = parse(json_elements(), "{\"arr\":[123,456,789],\"obj\":{\"key\":\"value\",\"key\":123}}");
 
         assert_eq!(result.is_ok(), true);
         assert_eq!(
@@ -866,7 +866,6 @@ mod tests {
                 ]),
             ]),
         );
-        
 
     }
 }
