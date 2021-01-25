@@ -2,48 +2,33 @@ extern crate regex;
 
 use regex::Regex;
 
-#[derive(Debug, Clone, PartialEq)]
-enum Value {
-    None,
-    Some(String),
-    List(Vec<Value>),
-}
-
 #[derive(Debug)]
-struct Success {
-    pub position: i32,
-    pub value: Value,
+struct Success<Output: Clone> {
+    pub position: usize,
+    pub value: Output,
 }
 
 #[derive(Debug)]
 struct Failure {
-    pub position: i32,
+    pub position: usize,
     pub expected: Vec<String>,
 }
 
-trait Reply {
-    fn position(&self) -> i32;
-    fn err_position(&self) -> i32;
-    fn value(&self) -> Value;
+trait ParseResult<Output: Clone> {
+    fn position(&self) -> usize;
+    fn value(&self) -> Output;
     fn expected(&self) -> Vec<String>;
 }
 
-impl Reply for Result<Success, Failure> {
-    fn position(&self) -> i32 {
+impl<Output: Clone> ParseResult<Output> for Result<Success<Output>, Failure> {
+    fn position(&self) -> usize {
         match self {
             Ok(success) => success.position,
             Err(failure) => failure.position,
         }
     }
 
-    fn err_position(&self) -> i32 {
-        match self {
-            Ok(_) => -1,
-            Err(failure) => failure.position,
-        }
-    }
-
-    fn value(&self) -> Value {
+    fn value(&self) -> Output {
         match self {
             Ok(success) => success.value.clone(),
             Err(_) => panic!(),
@@ -58,43 +43,41 @@ impl Reply for Result<Success, Failure> {
     }
 }
 
-fn merge_results(
-    curr: Result<Success, Failure>,
-    last: Result<Success, Failure>,
-) -> Result<Success, Failure> {
-    if curr.is_ok() {
-        return curr;
-    }
-    if curr.err_position() == last.err_position() {
-        let curr_failure = curr.unwrap_err();
-        let last_failure = last.unwrap_err();
-        return Err(Failure {
-            position: curr_failure.position,
-            expected: [curr_failure.expected, last_failure.expected].concat(),
-        });
-    }
-    if curr.err_position() > last.err_position() {
-        return curr;
-    }
-    last
-}
-
-trait Parser<'a> {
-    fn parse(&self, input: &'a str, position: i32) -> Result<Success, Failure>;
-}
-
-impl<'a, F> Parser<'a> for F
+fn merge_results<Output>(
+    curr: Result<Success<Output>, Failure>,
+    last: Result<Success<Output>, Failure>,
+) -> Result<Success<Output>, Failure>
 where
-    F: Fn(&'a str, i32) -> Result<Success, Failure>,
+    Output: Clone,
 {
-    fn parse(&self, input: &'a str, position: i32) -> Result<Success, Failure> {
+    if curr.is_err() && last.is_err() && (curr.position() == last.position()) {
+        Err(Failure {
+            position: curr.position(),
+            expected: [curr.expected(), last.expected()].concat(),
+        })
+    } else {
+        curr
+    }
+}
+
+trait Parser<'a, Output: Clone> {
+    fn parse(&self, input: &'a str, position: usize) -> Result<Success<Output>, Failure>;
+}
+
+impl<'a, F, Output> Parser<'a, Output> for F
+where
+    F: Fn(&'a str, usize) -> Result<Success<Output>, Failure>,
+    Output: Clone,
+{
+    fn parse(&self, input: &'a str, position: usize) -> Result<Success<Output>, Failure> {
         self(input, position)
     }
 }
 
-fn parse<'a, P>(parser: P, source: &'a str) -> Result<Success, Failure>
+fn parse<'a, P, Output>(parser: P, source: &'a str) -> Result<Success<Output>, Failure>
 where
-    P: Parser<'a>,
+    P: Parser<'a, Output>,
+    Output: Clone,
 {
     let result = parser.parse(&source, 0);
     let pos = result.position();
@@ -104,7 +87,7 @@ where
             expected: result.expected(),
         });
     }
-    if pos < source.len() as i32 {
+    if pos < source.len() {
         return Err(Failure {
             position: pos,
             expected: vec!["EOF".to_string()],
@@ -116,39 +99,48 @@ where
     })
 }
 
-fn and<'a, A, B>(parser1: A, parser2: B) -> impl Parser<'a>
+fn and<'a, A, B, OutputA, OutputB>(parser1: A, parser2: B) -> impl Parser<'a, (OutputA, OutputB)>
 where
-    A: Parser<'a>,
-    B: Parser<'a>,
+    A: Parser<'a, OutputA>,
+    B: Parser<'a, OutputB>,
+    OutputA: Clone,
+    OutputB: Clone,
 {
-    move |source: &'a str, position| -> Result<Success, Failure> {
-        let mut result = parser1.parse(&source, position);
+    move |source: &'a str, position| -> Result<Success<(OutputA, OutputB)>, Failure> {
+        let result = parser1.parse(&source, position);
         if result.is_err() {
-            return result;
+            return Err(Failure {
+                position: result.position(),
+                expected: result.expected(),
+            });
         }
         let mut pos = result.position();
-        let mut acc: Vec<Value> = vec![result.value()];
+        let value1 = result.value();
 
-        result = merge_results(parser2.parse(&source, pos), result);
+        let result = parser2.parse(&source, pos);
         if result.is_err() {
-            return result;
+            return Err(Failure {
+                position: result.position(),
+                expected: result.expected(),
+            });
         }
         pos = result.position();
-        acc.push(result.value());
+        let value2 = result.value();
 
         Ok(Success {
             position: pos,
-            value: Value::List(acc),
+            value: (value1, value2),
         })
     }
 }
 
-fn or<'a, P1, P2>(parser1: P1, parser2: P2) -> impl Parser<'a>
+fn or<'a, P1, P2, Output>(parser1: P1, parser2: P2) -> impl Parser<'a, Output>
 where
-    P1: Parser<'a>,
-    P2: Parser<'a>,
+    P1: Parser<'a, Output>,
+    P2: Parser<'a, Output>,
+    Output: Clone,
 {
-    move |source: &'a str, position| -> Result<Success, Failure> {
+    move |source: &'a str, position| -> Result<Success<Output>, Failure> {
         let result = parser1.parse(&source, position);
         if result.is_ok() {
             return result;
@@ -157,20 +149,21 @@ where
     }
 }
 
-fn many<'a, P>(parser: P) -> impl Parser<'a>
+fn many<'a, P, Output>(parser: P) -> impl Parser<'a, Vec<Output>>
 where
-    P: Parser<'a>,
+    P: Parser<'a, Output>,
+    Output: Clone,
 {
-    move |source: &'a str, position| -> Result<Success, Failure> {
+    move |source: &'a str, position| -> Result<Success<Vec<Output>>, Failure> {
         let mut result = parser.parse(&source, position);
         if result.is_err() {
             return Ok(Success {
                 position,
-                value: Value::None,
+                value: vec![],
             });
         }
         let mut pos = result.position();
-        let mut acc: Vec<Value> = vec![result.value()];
+        let mut acc: Vec<Output> = vec![result.value()];
         loop {
             result = merge_results(parser.parse(&source, pos), result);
             if result.is_ok() {
@@ -180,18 +173,20 @@ where
             }
             return Ok(Success {
                 position: pos,
-                value: Value::List(acc),
+                value: acc,
             });
         }
     }
 }
 
-fn map<'a, P, F>(parser: P, func: F) -> impl Parser<'a>
+fn map<'a, P, F, Input, Output>(parser: P, func: F) -> impl Parser<'a, Output>
 where
-    P: Parser<'a>,
-    F: Fn(Value) -> Value,
+    P: Parser<'a, Input>,
+    F: Fn(Input) -> Output,
+    Input: Clone,
+    Output: Clone,
 {
-    move |source, position| -> Result<Success, Failure> {
+    move |source, position| -> Result<Success<Output>, Failure> {
         let result = parser.parse(source, position);
         if result.is_ok() {
             Ok(Success {
@@ -199,14 +194,17 @@ where
                 value: func(result.value()),
             })
         } else {
-            result
+            Err(Failure {
+                position: result.position(),
+                expected: result.expected(),
+            })
         }
     }
 }
 
-fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a> {
-    move |source: &'a str, position: i32| -> Result<Success, Failure> {
-        let src = &source[position as usize..source.len()];
+fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a, String> {
+    move |source: &'a str, position| -> Result<Success<String>, Failure> {
+        let src = &source[position..source.len()];
         let ptn = "^".to_string() + pattern;
         let regex = Regex::new(&ptn).unwrap();
         let captures = regex.captures(src);
@@ -215,8 +213,8 @@ fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a> {
                 let text = caps.get(group).unwrap().as_str();
                 let mat = caps.get(0).unwrap();
                 Ok(Success {
-                    position: position + (mat.end() - mat.start()) as i32,
-                    value: Value::Some(text.to_string()),
+                    position: position + (mat.end() - mat.start()),
+                    value: text.to_string(),
                 })
             }
             None => Err(Failure {
@@ -227,46 +225,50 @@ fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a> {
     }
 }
 
-fn sep_by<'a, P, S>(parser: P, separator: S) -> impl Parser<'a>
+fn sep_by<'a, P, S, OutputP, OutputS>(parser: P, separator: S) -> impl Parser<'a, Vec<OutputP>>
 where
-    P: Parser<'a>,
-    S: Parser<'a>,
+    P: Parser<'a, OutputP>,
+    S: Parser<'a, OutputS>,
+    OutputP: Clone,
+    OutputS: Clone,
 {
-    move |source: &'a str, position| -> Result<Success, Failure> {
+    move |source: &'a str, position| -> Result<Success<Vec<OutputP>>, Failure> {
         let mut result = parser.parse(&source, position);
         if result.is_err() {
             return Ok(Success {
                 position,
-                value: Value::None,
+                value: vec![],
             });
         }
         let mut pos;
-        let mut acc: Vec<Value> = Vec::new();
+        let mut acc: Vec<OutputP> = Vec::new();
         loop {
             pos = result.position();
             acc.push(result.value());
-            result = merge_results(separator.parse(&source, pos), result);
-            if result.is_err() {
+            let sep_result = separator.parse(&source, pos);
+            if sep_result.is_err() {
                 break;
             }
-            result = merge_results(parser.parse(&source, result.position()), result);
+            result = parser.parse(&source, sep_result.position());
             if result.is_err() {
                 break;
             }
         }
         Ok(Success {
             position: pos,
-            value: Value::List(acc),
+            value: acc,
         })
     }
 }
 
-fn sep_by1<'a, P, S>(parser: P, separator: S) -> impl Parser<'a>
+fn sep_by1<'a, P, S, OutputP, OutputS>(parser: P, separator: S) -> impl Parser<'a, Vec<OutputP>>
 where
-    P: Parser<'a>,
-    S: Parser<'a>,
+    P: Parser<'a, OutputP>,
+    S: Parser<'a, OutputS>,
+    OutputP: Clone,
+    OutputS: Clone,
 {
-    move |source: &'a str, position| -> Result<Success, Failure> {
+    move |source: &'a str, position| -> Result<Success<Vec<OutputP>>, Failure> {
         let mut result = parser.parse(&source, position);
         if result.is_err() {
             return Err(Failure {
@@ -275,62 +277,52 @@ where
             });
         }
         let mut pos;
-        let mut acc: Vec<Value> = Vec::new();
+        let mut acc: Vec<OutputP> = Vec::new();
         loop {
             pos = result.position();
             acc.push(result.value());
-            result = merge_results(separator.parse(&source, pos), result);
+            let sep_result = separator.parse(&source, pos);
             if result.is_err() {
                 break;
             }
-            result = merge_results(parser.parse(&source, result.position()), result);
+            result = parser.parse(&source, sep_result.position());
             if result.is_err() {
                 break;
             }
         }
         Ok(Success {
             position: pos,
-            value: Value::List(acc),
+            value: acc,
         })
     }
 }
 
-fn skip<'a, P1, P2>(first: P1, second: P2) -> impl Parser<'a>
+fn skip<'a, P1, P2, Output1, Output2>(parser1: P1, parser2: P2) -> impl Parser<'a, Output1>
 where
-    P1: Parser<'a>,
-    P2: Parser<'a>,
+    P1: Parser<'a, Output1>,
+    P2: Parser<'a, Output2>,
+    Output1: Clone,
+    Output2: Clone,
 {
-    map(and(first, second), move |value: Value| match value {
-        Value::List(val) => val.first().unwrap().clone(),
-        _ => panic!(),
-    })
+    map(and(parser1, parser2), move |value| value.0)
 }
 
-fn string<'a>(string: &'a str) -> impl Parser<'a> {
-    move |source: &'a str, position| -> Result<Success, Failure> {
-        let to = position + (string.len() as i32);
-        if to > source.len() as i32 {
+fn string<'a>(string: &'a str) -> impl Parser<'a, String> {
+    move |source: &'a str, position| -> Result<Success<String>, Failure> {
+        let to = position + string.len();
+        if to > source.len() {
             return Err(Failure {
                 position,
                 expected: vec![string.to_string()],
             });
         }
-        let head = source.get(position as usize..to as usize);
-        match head {
-            Some(s) => {
-                if s == string {
-                    Ok(Success {
-                        position: to,
-                        value: Value::Some(s.to_string()),
-                    })
-                } else {
-                    Err(Failure {
-                        position,
-                        expected: vec![string.to_string()],
-                    })
-                }
-            }
-            None => Err(Failure {
+        let head = source.get(position..to);
+        match head.map(|s| s == string) {
+            Some(true) => Ok(Success {
+                position: to,
+                value: head.unwrap().to_string(),
+            }),
+            _ => Err(Failure {
                 position,
                 expected: vec![string.to_string()],
             }),
@@ -338,20 +330,20 @@ fn string<'a>(string: &'a str) -> impl Parser<'a> {
     }
 }
 
-fn then<'a, P1, P2>(first: P1, second: P2) -> impl Parser<'a>
+fn then<'a, P1, P2, Output1, Output2>(parser1: P1, parser2: P2) -> impl Parser<'a, Output2>
 where
-    P1: Parser<'a>,
-    P2: Parser<'a>,
+    P1: Parser<'a, Output1>,
+    P2: Parser<'a, Output2>,
+    Output1: Clone,
+    Output2: Clone,
 {
-    map(and(first, second), move |value: Value| match value {
-        Value::List(val) => val.last().unwrap().clone(),
-        _ => panic!(),
-    })
+    map(and(parser1, parser2), move |value| value.1)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn and_ok() {
@@ -360,13 +352,7 @@ mod tests {
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::List(vec![
-                    Value::Some("key".to_string()),
-                    Value::Some(":".to_string()),
-                ]),
-                Value::Some("value".to_string()),
-            ]),
+            (("key".to_string(), ":".to_string(),), "value".to_string(),),
         );
     }
 
@@ -375,7 +361,7 @@ mod tests {
         let parser = and(and(string("key"), string(":")), string("value"));
         let result = parse(parser, "key:valu");
         assert_eq!(result.is_ok(), false);
-        assert_eq!(result.err_position(), 4);
+        assert_eq!(result.position(), 4);
     }
 
     #[test]
@@ -383,7 +369,7 @@ mod tests {
         let parser = or(or(string("x"), string("y")), string("z"));
         let result = parse(parser, "x");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("x".to_string()));
+        assert_eq!(result.value(), "x".to_string());
     }
 
     #[test]
@@ -391,7 +377,7 @@ mod tests {
         let parser = or(or(string("x"), string("y")), string("z"));
         let result = parse(parser, "w");
         assert_eq!(result.is_ok(), false);
-        assert_eq!(result.err_position(), 0);
+        assert_eq!(result.position(), 0);
     }
 
     #[test]
@@ -401,18 +387,19 @@ mod tests {
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("xy".to_string()),
-                Value::Some("xy".to_string()),
-                Value::Some("xy".to_string()),
-                Value::Some("xy".to_string()),
-            ]),
+            vec![
+                "xy".to_string(),
+                "xy".to_string(),
+                "xy".to_string(),
+                "xy".to_string(),
+            ],
         );
 
         let parser = many(string("xy"));
         let result = parse(parser, "");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::None);
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(result.value(), empty);
     }
 
     #[test]
@@ -420,7 +407,7 @@ mod tests {
         let parser = many(string("x"));
         let result = parse(parser, "xxxxxy");
         assert_eq!(result.is_ok(), false);
-        assert_eq!(result.err_position(), 5);
+        assert_eq!(result.position(), 5);
     }
 
     #[test]
@@ -428,12 +415,12 @@ mod tests {
         let parser = regex(r"([0-9]+)([a-z]+)", 1);
         let result = parse(parser, "123abc");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("123".to_string()));
+        assert_eq!(result.value(), "123".to_string());
 
         let parser = regex(r"[0-9]+", 0);
         let result = parse(parser, "123");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("123".to_string()));
+        assert_eq!(result.value(), "123".to_string());
     }
 
     #[test]
@@ -441,7 +428,7 @@ mod tests {
         let parser = regex(r"[0-9]+", 0);
         let result = parse(parser, "12a");
         assert_eq!(result.is_ok(), false);
-        assert_eq!(result.err_position(), 2);
+        assert_eq!(result.position(), 2);
     }
 
     #[test]
@@ -449,21 +436,14 @@ mod tests {
         let parser = sep_by1(string("val"), string(","));
         let result = parse(parser, "val");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(
-            result.value(),
-            Value::List(vec![Value::Some("val".to_string())]),
-        );
+        assert_eq!(result.value(), vec!["val".to_string()],);
 
         let parser = sep_by1(string("val"), string(","));
         let result = parse(parser, "val,val,val");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("val".to_string()),
-                Value::Some("val".to_string()),
-                Value::Some("val".to_string()),
-            ]),
+            vec!["val".to_string(), "val".to_string(), "val".to_string()],
         );
     }
 
@@ -472,12 +452,12 @@ mod tests {
         let parser = sep_by1(string("val"), string(","));
         let result = parse(parser, "");
         assert_eq!(result.is_ok(), false);
-        assert_eq!(result.err_position(), 0);
+        assert_eq!(result.position(), 0);
 
         let parser = sep_by1(string("val"), string(","));
         let result = parse(parser, "val,");
         assert_eq!(result.is_ok(), false);
-        assert_eq!(result.err_position(), 3);
+        assert_eq!(result.position(), 3);
     }
 
     #[test]
@@ -485,26 +465,20 @@ mod tests {
         let parser = sep_by(string("val"), string(","));
         let result = parse(parser, "");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::None);
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(result.value(), empty);
 
         let parser = sep_by(string("val"), string(","));
         let result = parse(parser, "val");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(
-            result.value(),
-            Value::List(vec![Value::Some("val".to_string())]),
-        );
+        assert_eq!(result.value(), vec!["val".to_string()],);
 
         let parser = sep_by(string("val"), string(","));
         let result = parse(parser, "val,val,val");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("val".to_string()),
-                Value::Some("val".to_string()),
-                Value::Some("val".to_string()),
-            ]),
+            vec!["val".to_string(), "val".to_string(), "val".to_string()],
         );
     }
 
@@ -513,7 +487,7 @@ mod tests {
         let parser = sep_by(string("val"), string(","));
         let result = parse(parser, "val,");
         assert_eq!(result.is_ok(), false);
-        assert_eq!(result.err_position(), 3);
+        assert_eq!(result.position(), 3);
     }
 
     #[test]
@@ -521,7 +495,7 @@ mod tests {
         let parser = skip(string("x"), string("y"));
         let result = parse(parser, "xy");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("x".to_string()));
+        assert_eq!(result.value(), "x".to_string());
     }
 
     #[test]
@@ -529,7 +503,7 @@ mod tests {
         let parser = skip(string("xxx"), string("yyy"));
         let result = parse(parser, "xxxxyy");
         assert_eq!(result.is_ok(), false);
-        assert_eq!(result.err_position(), 3);
+        assert_eq!(result.position(), 3);
     }
 
     #[test]
@@ -537,7 +511,7 @@ mod tests {
         let parser = string("source");
         let result = parse(parser, "source");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("source".to_string()));
+        assert_eq!(result.value(), "source".to_string());
     }
 
     #[test]
@@ -545,7 +519,7 @@ mod tests {
         let parser = string("source");
         let result = parse(parser, "other");
         assert_eq!(result.is_ok(), false);
-        assert_eq!(result.err_position(), 0);
+        assert_eq!(result.position(), 0);
     }
 
     #[test]
@@ -553,7 +527,7 @@ mod tests {
         let parser = then(string("x"), string("y"));
         let result = parse(parser, "xy");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("y".to_string()));
+        assert_eq!(result.value(), "y".to_string());
     }
 
     #[test]
@@ -561,51 +535,71 @@ mod tests {
         let parser = then(string("xxx"), string("yyy"));
         let result = parse(parser, "xxxxyy");
         assert_eq!(result.is_ok(), false);
-        assert_eq!(result.err_position(), 3);
+        assert_eq!(result.position(), 3);
     }
 
     #[test]
     fn json_ok() {
-        fn json_boolean<'a>() -> impl Parser<'a> {
-            or(string("true"), string("false"))
+        #[derive(PartialEq, Debug, Clone)]
+        enum JsonValue {
+            Number(i64),
+            String(String),
+            Bool(bool),
+            Object(HashMap<String, JsonValue>),
+            Array(Vec<JsonValue>),
+        }
+
+        fn json_boolean<'a>() -> impl Parser<'a, JsonValue> {
+            map(or(string("true"), string("false")), |input| {
+                if input == "true" {
+                    JsonValue::Bool(true)
+                } else {
+                    JsonValue::Bool(false)
+                }
+            })
         }
 
         let result = parse(json_boolean(), "true");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("true".to_string()));
+        assert_eq!(result.value(), JsonValue::Bool(true));
 
         let result = parse(json_boolean(), "false");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("false".to_string()));
+        assert_eq!(result.value(), JsonValue::Bool(false));
 
-        fn json_number<'a>() -> impl Parser<'a> {
-            regex("-?(0|[1-9][0-9]*)", 0)
+        fn json_number<'a>() -> impl Parser<'a, JsonValue> {
+            map(regex("-?(0|[1-9][0-9]*)", 0), |input| {
+                JsonValue::Number(input.parse::<i64>().unwrap())
+            })
         }
 
         let result = parse(json_number(), "-123");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("-123".to_string()));
+        assert_eq!(result.value(), JsonValue::Number(-123));
 
         let result = parse(json_number(), "1230");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("1230".to_string()));
+        assert_eq!(result.value(), JsonValue::Number(1230));
 
-        fn json_string<'a>() -> impl Parser<'a> {
-            regex("\"(.*?)\"", 1)
+        fn json_string<'a>() -> impl Parser<'a, JsonValue> {
+            map(regex("\"(.*?)\"", 1), |input| JsonValue::String(input))
         }
 
         let result = parse(json_string(), "\"foobar\"");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("foobar".to_string()));
+        assert_eq!(result.value(), JsonValue::String("foobar".to_string()));
 
         let result = parse(json_string(), "\"\"");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("".to_string()));
+        assert_eq!(result.value(), JsonValue::String("".to_string()));
 
-        fn json_array<'a>() -> impl Parser<'a> {
-            skip(
-                then(string("["), sep_by(json_elements(), string(","))),
-                string("]"),
+        fn json_array<'a>() -> impl Parser<'a, JsonValue> {
+            map(
+                skip(
+                    then(string("["), sep_by(json_elements(), string(","))),
+                    string("]"),
+                ),
+                |input| JsonValue::Array(input),
             )
         }
 
@@ -613,9 +607,9 @@ mod tests {
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("foo".to_string()),
-                Value::Some("bar".to_string()),
+            JsonValue::Array(vec![
+                JsonValue::String("foo".to_string()),
+                JsonValue::String("bar".to_string()),
             ]),
         );
 
@@ -623,97 +617,80 @@ mod tests {
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("123".to_string()),
-                Value::Some("456".to_string()),
-                Value::Some("789".to_string()),
+            JsonValue::Array(vec![
+                JsonValue::Number(123),
+                JsonValue::Number(456),
+                JsonValue::Number(789),
             ]),
         );
 
-        fn json_pair<'a>() -> impl Parser<'a> {
-            and(skip(json_string(), string(":")), json_elements())
+        fn json_pair<'a>() -> impl Parser<'a, (String, JsonValue)> {
+            and(skip(regex("\"(.*?)\"", 1), string(":")), json_elements())
         }
 
         let result = parse(json_pair(), "\"key\":\"value\"");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("key".to_string()),
-                Value::Some("value".to_string()),
-            ]),
+            ("key".to_string(), JsonValue::String("value".to_string())),
         );
 
         let result = parse(json_pair(), "\"key\":123");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(
-            result.value(),
-            Value::List(vec![
-                Value::Some("key".to_string()),
-                Value::Some("123".to_string()),
-            ]),
-        );
+        assert_eq!(result.value(), ("key".to_string(), JsonValue::Number(123)));
 
         let result = parse(json_pair(), "\"key\":[123,456,789]");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("key".to_string()),
-                Value::List(vec![
-                    Value::Some("123".to_string()),
-                    Value::Some("456".to_string()),
-                    Value::Some("789".to_string()),
+            (
+                "key".to_string(),
+                JsonValue::Array(vec![
+                    JsonValue::Number(123),
+                    JsonValue::Number(456),
+                    JsonValue::Number(789),
                 ]),
-            ]),
+            ),
         );
 
-        fn json_object<'a>() -> impl Parser<'a> {
-            skip(
-                then(string("{"), sep_by(json_pair(), string(","))),
-                string("}"),
+        fn json_object<'a>() -> impl Parser<'a, JsonValue> {
+            map(
+                skip(
+                    then(string("{"), sep_by(json_pair(), string(","))),
+                    string("}"),
+                ),
+                |input| JsonValue::Object(input.into_iter().collect()),
             )
         }
 
         let result = parse(json_object(), "{\"key1\":\"value\",\"key2\":123}");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(
-            result.value(),
-            Value::List(vec![
-                Value::List(vec![
-                    Value::Some("key1".to_string()),
-                    Value::Some("value".to_string()),
-                ]),
-                Value::List(vec![
-                    Value::Some("key2".to_string()),
-                    Value::Some("123".to_string()),
-                ]),
-            ]),
-        );
+        let mut object = HashMap::new();
+        object.insert("key1".to_string(), JsonValue::String("value".to_string()));
+        object.insert("key2".to_string(), JsonValue::Number(123));
+        assert_eq!(result.value(), JsonValue::Object(object));
 
         let result = parse(json_object(), "{\"key1\":[123,456,789],\"key2\":\"value\"}");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(
-            result.value(),
-            Value::List(vec![
-                Value::List(vec![
-                    Value::Some("key1".to_string()),
-                    Value::List(vec![
-                        Value::Some("123".to_string()),
-                        Value::Some("456".to_string()),
-                        Value::Some("789".to_string()),
-                    ]),
-                ]),
-                Value::List(vec![
-                    Value::Some("key2".to_string()),
-                    Value::Some("value".to_string()),
-                ]),
+        let mut object = HashMap::new();
+        object.insert(
+            "key1".to_string(),
+            JsonValue::Array(vec![
+                JsonValue::Number(123),
+                JsonValue::Number(456),
+                JsonValue::Number(789),
             ]),
         );
+        object.insert("key2".to_string(), JsonValue::String("value".to_string()));
+        assert_eq!(result.value(), JsonValue::Object(object));
 
         struct JsonElements;
-        impl<'a> Parser<'a> for JsonElements {
-            fn parse(&self, input: &'a str, position: i32) -> Result<Success, Failure> {
+        impl<'a> Parser<'a, JsonValue> for JsonElements {
+            fn parse(
+                &self,
+                input: &'a str,
+                position: usize,
+            ) -> Result<Success<JsonValue>, Failure> {
                 or(
                     or(
                         or(or(json_object(), json_array()), json_string()),
@@ -724,41 +701,41 @@ mod tests {
                 .parse(input, position)
             }
         }
-        fn json_elements<'a>() -> impl Parser<'a> {
+        fn json_elements<'a>() -> impl Parser<'a, JsonValue> {
             JsonElements
         }
 
         let result = parse(json_elements(), "true");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("true".to_string()));
+        assert_eq!(result.value(), JsonValue::Bool(true));
 
         let result = parse(json_elements(), "false");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("false".to_string()));
+        assert_eq!(result.value(), JsonValue::Bool(false));
 
         let result = parse(json_elements(), "-123");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("-123".to_string()));
+        assert_eq!(result.value(), JsonValue::Number(-123));
 
         let result = parse(json_elements(), "1230");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("1230".to_string()));
+        assert_eq!(result.value(), JsonValue::Number(1230));
 
         let result = parse(json_elements(), "\"foobar\"");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("foobar".to_string()));
+        assert_eq!(result.value(), JsonValue::String("foobar".to_string()));
 
         let result = parse(json_elements(), "\"\"");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), Value::Some("".to_string()));
+        assert_eq!(result.value(), JsonValue::String("".to_string()));
 
         let result = parse(json_elements(), "[\"foo\",\"bar\"]");
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("foo".to_string()),
-                Value::Some("bar".to_string()),
+            JsonValue::Array(vec![
+                JsonValue::String("foo".to_string()),
+                JsonValue::String("bar".to_string()),
             ]),
         );
 
@@ -766,72 +743,50 @@ mod tests {
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            Value::List(vec![
-                Value::Some("123".to_string()),
-                Value::Some("456".to_string()),
-                Value::Some("789".to_string()),
+            JsonValue::Array(vec![
+                JsonValue::Number(123),
+                JsonValue::Number(456),
+                JsonValue::Number(789),
             ]),
         );
 
-        let result = parse(json_elements(), "{\"key\":\"value\",\"key\":123}");
+        let result = parse(json_elements(), "{\"key1\":\"value\",\"key2\":123}");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(
-            result.value(),
-            Value::List(vec![
-                Value::List(vec![
-                    Value::Some("key".to_string()),
-                    Value::Some("value".to_string()),
-                ]),
-                Value::List(vec![
-                    Value::Some("key".to_string()),
-                    Value::Some("123".to_string()),
-                ]),
-            ]),
-        );
+        let mut object = HashMap::new();
+        object.insert("key1".to_string(), JsonValue::String("value".to_string()));
+        object.insert("key2".to_string(), JsonValue::Number(123));
+        assert_eq!(result.value(), JsonValue::Object(object));
         let result = parse(json_elements(), "{\"arr\":[123,456,789]}");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(
-            result.value(),
-            Value::List(vec![Value::List(vec![
-                Value::Some("arr".to_string()),
-                Value::List(vec![
-                    Value::Some("123".to_string()),
-                    Value::Some("456".to_string()),
-                    Value::Some("789".to_string()),
-                ]),
-            ])]),
+        let mut object = HashMap::new();
+        object.insert(
+            "arr".to_string(),
+            JsonValue::Array(vec![
+                JsonValue::Number(123),
+                JsonValue::Number(456),
+                JsonValue::Number(789),
+            ]),
         );
+        assert_eq!(result.value(), JsonValue::Object(object));
 
         let result = parse(
             json_elements(),
-            "{\"arr\":[123,456,789],\"obj\":{\"key\":\"value\",\"key\":123}}",
+            "{\"arr\":[123,456,789],\"obj\":{\"key1\":\"value\",\"key2\":123}}",
         );
         assert_eq!(result.is_ok(), true);
-        assert_eq!(
-            result.value(),
-            Value::List(vec![
-                Value::List(vec![
-                    Value::Some("arr".to_string()),
-                    Value::List(vec![
-                        Value::Some("123".to_string()),
-                        Value::Some("456".to_string()),
-                        Value::Some("789".to_string()),
-                    ]),
-                ]),
-                Value::List(vec![
-                    Value::Some("obj".to_string()),
-                    Value::List(vec![
-                        Value::List(vec![
-                            Value::Some("key".to_string()),
-                            Value::Some("value".to_string()),
-                        ]),
-                        Value::List(vec![
-                            Value::Some("key".to_string()),
-                            Value::Some("123".to_string()),
-                        ]),
-                    ]),
-                ]),
+        let mut object1 = HashMap::new();
+        let mut object2 = HashMap::new();
+        object2.insert("key1".to_string(), JsonValue::String("value".to_string()));
+        object2.insert("key2".to_string(), JsonValue::Number(123));
+        object1.insert(
+            "arr".to_string(),
+            JsonValue::Array(vec![
+                JsonValue::Number(123),
+                JsonValue::Number(456),
+                JsonValue::Number(789),
             ]),
         );
+        object1.insert("obj".to_string(), JsonValue::Object(object2));
+        assert_eq!(result.value(), JsonValue::Object(object1));
     }
 }
