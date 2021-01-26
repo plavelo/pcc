@@ -508,6 +508,14 @@ mod tests {
         let result = parse(parser, "xy");
         assert_eq!(result.is_ok(), true);
         assert_eq!(result.value(), "x".to_string());
+
+        fn token<'a>(token: &'a str) -> impl Parser<'a, String> {
+            then(regex(r"\s*", 0), skip(string(token), regex(r"\s*", 0)))
+        }
+        let parser = token("t");
+        let result = parse(parser, "   t   ");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), "t".to_string());
     }
 
     #[test]
@@ -561,8 +569,15 @@ mod tests {
             Array(Vec<JsonValue>),
         }
 
+        fn token<'a, P>(parser: P) -> impl Parser<'a, String>
+        where
+            P: Parser<'a, String>,
+        {
+            skip(parser, regex(r"\s*", 0))
+        }
+
         fn json_boolean<'a>() -> impl Parser<'a, JsonValue> {
-            map(or(string("true"), string("false")), |input| {
+            map(token(or(string("true"), string("false"))), |input| {
                 if input == "true" {
                     JsonValue::Bool(true)
                 } else {
@@ -580,7 +595,7 @@ mod tests {
         assert_eq!(result.value(), JsonValue::Bool(false));
 
         fn json_number<'a>() -> impl Parser<'a, JsonValue> {
-            map(regex("-?(0|[1-9][0-9]*)", 0), |input| {
+            map(token(regex("-?(0|[1-9][0-9]*)", 0)), |input| {
                 JsonValue::Number(input.parse::<i64>().unwrap())
             })
         }
@@ -594,7 +609,9 @@ mod tests {
         assert_eq!(result.value(), JsonValue::Number(1230));
 
         fn json_string<'a>() -> impl Parser<'a, JsonValue> {
-            map(regex("\"(.*?)\"", 1), |input| JsonValue::String(input))
+            map(token(regex("\"(.*?)\"", 1)), |input| {
+                JsonValue::String(input)
+            })
         }
 
         let result = parse(json_string(), "\"foobar\"");
@@ -608,8 +625,11 @@ mod tests {
         fn json_array<'a>() -> impl Parser<'a, JsonValue> {
             map(
                 skip(
-                    then(string("["), sep_by(json_elements(), string(","))),
-                    string("]"),
+                    then(
+                        token(string("[")),
+                        sep_by(json_elements(), token(string(","))),
+                    ),
+                    token(string("]")),
                 ),
                 |input| JsonValue::Array(input),
             )
@@ -637,7 +657,10 @@ mod tests {
         );
 
         fn json_pair<'a>() -> impl Parser<'a, (String, JsonValue)> {
-            and(skip(regex("\"(.*?)\"", 1), string(":")), json_elements())
+            and(
+                skip(token(regex("\"(.*?)\"", 1)), token(string(":"))),
+                json_elements(),
+            )
         }
 
         let result = parse(json_pair(), "\"key\":\"value\"");
@@ -668,8 +691,8 @@ mod tests {
         fn json_object<'a>() -> impl Parser<'a, JsonValue> {
             map(
                 skip(
-                    then(string("{"), sep_by(json_pair(), string(","))),
-                    string("}"),
+                    then(token(string("{")), sep_by(json_pair(), token(string(",")))),
+                    token(string("}")),
                 ),
                 |input| JsonValue::Object(input.into_iter().collect()),
             )
@@ -781,9 +804,22 @@ mod tests {
         );
         assert_eq!(result.value(), JsonValue::Object(object));
 
+        let parser = then(regex(r"\s*", 0), json_elements());
         let result = parse(
-            json_elements(),
-            "{\"arr\":[123,456,789],\"obj\":{\"key1\":\"value\",\"key2\":123}}",
+            parser,
+            r#"
+            {
+                "arr" : [
+                    123,
+                    456,
+                    789
+                ],
+                "obj" : {
+                    "key1" : "value",
+                    "key2" : 123
+                }
+            }
+            "#,
         );
         assert_eq!(result.is_ok(), true);
         let mut object1 = HashMap::new();
