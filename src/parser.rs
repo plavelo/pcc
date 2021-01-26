@@ -1,5 +1,3 @@
-extern crate regex;
-
 use regex::Regex;
 
 #[derive(Debug)]
@@ -99,14 +97,17 @@ where
     })
 }
 
-fn and<'a, A, B, OutputA, OutputB>(parser1: A, parser2: B) -> impl Parser<'a, (OutputA, OutputB)>
+fn and<'a, P1, P2, Output1, Output2>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Parser<'a, (Output1, Output2)>
 where
-    A: Parser<'a, OutputA>,
-    B: Parser<'a, OutputB>,
-    OutputA: Clone,
-    OutputB: Clone,
+    P1: Parser<'a, Output1>,
+    P2: Parser<'a, Output2>,
+    Output1: Clone,
+    Output2: Clone,
 {
-    move |source: &'a str, position| -> Result<Success<(OutputA, OutputB)>, Failure> {
+    move |source: &'a str, position| -> Result<Success<(Output1, Output2)>, Failure> {
         let result = parser1.parse(&source, position);
         if result.is_err() {
             return Err(Failure {
@@ -206,8 +207,7 @@ fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a, String> {
     move |source: &'a str, position| -> Result<Success<String>, Failure> {
         let src = &source[position..source.len()];
         let ptn = "^".to_string() + pattern;
-        let regex = Regex::new(&ptn).unwrap();
-        let captures = regex.captures(src);
+        let captures = Regex::new(&ptn).unwrap().captures(src);
         match captures {
             Some(caps) => {
                 let text = caps.get(group).unwrap().as_str();
@@ -241,7 +241,7 @@ where
             });
         }
         let mut pos;
-        let mut acc: Vec<OutputP> = Vec::new();
+        let mut acc: Vec<OutputP> = vec![];
         loop {
             pos = result.position();
             acc.push(result.value());
@@ -277,7 +277,7 @@ where
             });
         }
         let mut pos;
-        let mut acc: Vec<OutputP> = Vec::new();
+        let mut acc: Vec<OutputP> = vec![];
         loop {
             pos = result.position();
             acc.push(result.value());
@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.value(),
-            (("key".to_string(), ":".to_string(),), "value".to_string(),),
+            (("key".to_string(), ":".to_string()), "value".to_string()),
         );
     }
 
@@ -398,7 +398,7 @@ mod tests {
         let parser = many(string("xy"));
         let result = parse(parser, "");
         assert_eq!(result.is_ok(), true);
-        let empty: Vec<String> = Vec::new();
+        let empty: Vec<String> = vec![];
         assert_eq!(result.value(), empty);
     }
 
@@ -436,7 +436,7 @@ mod tests {
         let parser = sep_by1(string("val"), string(","));
         let result = parse(parser, "val");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), vec!["val".to_string()],);
+        assert_eq!(result.value(), vec!["val".to_string()]);
 
         let parser = sep_by1(string("val"), string(","));
         let result = parse(parser, "val,val,val");
@@ -465,13 +465,13 @@ mod tests {
         let parser = sep_by(string("val"), string(","));
         let result = parse(parser, "");
         assert_eq!(result.is_ok(), true);
-        let empty: Vec<String> = Vec::new();
+        let empty: Vec<String> = vec![];
         assert_eq!(result.value(), empty);
 
         let parser = sep_by(string("val"), string(","));
         let result = parse(parser, "val");
         assert_eq!(result.is_ok(), true);
-        assert_eq!(result.value(), vec!["val".to_string()],);
+        assert_eq!(result.value(), vec!["val".to_string()]);
 
         let parser = sep_by(string("val"), string(","));
         let result = parse(parser, "val,val,val");
