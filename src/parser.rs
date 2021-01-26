@@ -41,6 +41,7 @@ impl<Output: Clone> ParseResult<Output> for Result<Success<Output>, Failure> {
     }
 }
 
+#[allow(dead_code)]
 fn merge_results<Output>(
     curr: Result<Success<Output>, Failure>,
     last: Result<Success<Output>, Failure>,
@@ -72,6 +73,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn parse<'a, P, Output>(parser: P, source: &'a str) -> Result<Success<Output>, Failure>
 where
     P: Parser<'a, Output>,
@@ -97,6 +99,7 @@ where
     })
 }
 
+#[allow(dead_code)]
 fn and<'a, P1, P2, Output1, Output2>(
     parser1: P1,
     parser2: P2,
@@ -135,6 +138,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn or<'a, P1, P2, Output>(parser1: P1, parser2: P2) -> impl Parser<'a, Output>
 where
     P1: Parser<'a, Output>,
@@ -150,6 +154,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn many<'a, P, Output>(parser: P) -> impl Parser<'a, Vec<Output>>
 where
     P: Parser<'a, Output>,
@@ -180,6 +185,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn map<'a, P, F, Input, Output>(parser: P, func: F) -> impl Parser<'a, Output>
 where
     P: Parser<'a, Input>,
@@ -203,6 +209,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a, String> {
     move |source: &'a str, position| -> Result<Success<String>, Failure> {
         let src = &source[position..source.len()];
@@ -225,6 +232,7 @@ fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a, String> {
     }
 }
 
+#[allow(dead_code)]
 fn sep_by<'a, P, S, OutputP, OutputS>(parser: P, separator: S) -> impl Parser<'a, Vec<OutputP>>
 where
     P: Parser<'a, OutputP>,
@@ -261,6 +269,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn sep_by1<'a, P, S, OutputP, OutputS>(parser: P, separator: S) -> impl Parser<'a, Vec<OutputP>>
 where
     P: Parser<'a, OutputP>,
@@ -297,6 +306,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn skip<'a, P1, P2, Output1, Output2>(parser1: P1, parser2: P2) -> impl Parser<'a, Output1>
 where
     P1: Parser<'a, Output1>,
@@ -307,6 +317,7 @@ where
     map(and(parser1, parser2), move |value| value.0)
 }
 
+#[allow(dead_code)]
 fn string<'a>(string: &'a str) -> impl Parser<'a, String> {
     move |source: &'a str, position| -> Result<Success<String>, Failure> {
         let to = position + string.len();
@@ -330,6 +341,7 @@ fn string<'a>(string: &'a str) -> impl Parser<'a, String> {
     }
 }
 
+#[allow(dead_code)]
 fn then<'a, P1, P2, Output1, Output2>(parser1: P1, parser2: P2) -> impl Parser<'a, Output2>
 where
     P1: Parser<'a, Output1>,
