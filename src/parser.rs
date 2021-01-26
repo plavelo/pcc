@@ -1,18 +1,18 @@
 use regex::Regex;
 
 #[derive(Debug)]
-struct Success<Output: Clone> {
+pub struct Success<Output: Clone> {
     pub position: usize,
     pub value: Output,
 }
 
 #[derive(Debug)]
-struct Failure {
+pub struct Failure {
     pub position: usize,
     pub expected: Vec<String>,
 }
 
-trait ParseResult<Output: Clone> {
+pub trait ParseResult<Output: Clone> {
     fn position(&self) -> usize;
     fn value(&self) -> Output;
     fn expected(&self) -> Vec<String>;
@@ -59,7 +59,7 @@ where
     }
 }
 
-trait Parser<'a, Output: Clone> {
+pub trait Parser<'a, Output: Clone> {
     fn parse(&self, input: &'a str, position: usize) -> Result<Success<Output>, Failure>;
 }
 
@@ -73,8 +73,7 @@ where
     }
 }
 
-#[allow(dead_code)]
-fn parse<'a, P, Output>(parser: P, source: &'a str) -> Result<Success<Output>, Failure>
+pub fn parse<'a, P, Output>(parser: P, source: &'a str) -> Result<Success<Output>, Failure>
 where
     P: Parser<'a, Output>,
     Output: Clone,
@@ -99,8 +98,7 @@ where
     })
 }
 
-#[allow(dead_code)]
-fn and<'a, P1, P2, Output1, Output2>(
+pub fn and<'a, P1, P2, Output1, Output2>(
     parser1: P1,
     parser2: P2,
 ) -> impl Parser<'a, (Output1, Output2)>
@@ -138,8 +136,7 @@ where
     }
 }
 
-#[allow(dead_code)]
-fn or<'a, P1, P2, Output>(parser1: P1, parser2: P2) -> impl Parser<'a, Output>
+pub fn or<'a, P1, P2, Output>(parser1: P1, parser2: P2) -> impl Parser<'a, Output>
 where
     P1: Parser<'a, Output>,
     P2: Parser<'a, Output>,
@@ -154,8 +151,7 @@ where
     }
 }
 
-#[allow(dead_code)]
-fn many<'a, P, Output>(parser: P) -> impl Parser<'a, Vec<Output>>
+pub fn many<'a, P, Output>(parser: P) -> impl Parser<'a, Vec<Output>>
 where
     P: Parser<'a, Output>,
     Output: Clone,
@@ -185,8 +181,7 @@ where
     }
 }
 
-#[allow(dead_code)]
-fn map<'a, P, F, Input, Output>(parser: P, func: F) -> impl Parser<'a, Output>
+pub fn map<'a, P, F, Input, Output>(parser: P, func: F) -> impl Parser<'a, Output>
 where
     P: Parser<'a, Input>,
     F: Fn(Input) -> Output,
@@ -209,8 +204,7 @@ where
     }
 }
 
-#[allow(dead_code)]
-fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a, String> {
+pub fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a, String> {
     move |source: &'a str, position| -> Result<Success<String>, Failure> {
         let src = &source[position..source.len()];
         let ptn = "^".to_string() + pattern;
@@ -270,7 +264,7 @@ where
 }
 
 #[allow(dead_code)]
-fn sep_by1<'a, P, S, OutputP, OutputS>(parser: P, separator: S) -> impl Parser<'a, Vec<OutputP>>
+pub fn sep_by1<'a, P, S, OutputP, OutputS>(parser: P, separator: S) -> impl Parser<'a, Vec<OutputP>>
 where
     P: Parser<'a, OutputP>,
     S: Parser<'a, OutputS>,
@@ -306,8 +300,7 @@ where
     }
 }
 
-#[allow(dead_code)]
-fn skip<'a, P1, P2, Output1, Output2>(parser1: P1, parser2: P2) -> impl Parser<'a, Output1>
+pub fn skip<'a, P1, P2, Output1, Output2>(parser1: P1, parser2: P2) -> impl Parser<'a, Output1>
 where
     P1: Parser<'a, Output1>,
     P2: Parser<'a, Output2>,
@@ -317,8 +310,7 @@ where
     map(and(parser1, parser2), move |value| value.0)
 }
 
-#[allow(dead_code)]
-fn string<'a>(string: &'a str) -> impl Parser<'a, String> {
+pub fn string<'a>(string: &'a str) -> impl Parser<'a, String> {
     move |source: &'a str, position| -> Result<Success<String>, Failure> {
         let to = position + string.len();
         if to > source.len() {
@@ -341,8 +333,7 @@ fn string<'a>(string: &'a str) -> impl Parser<'a, String> {
     }
 }
 
-#[allow(dead_code)]
-fn then<'a, P1, P2, Output1, Output2>(parser1: P1, parser2: P2) -> impl Parser<'a, Output2>
+pub fn then<'a, P1, P2, Output1, Output2>(parser1: P1, parser2: P2) -> impl Parser<'a, Output2>
 where
     P1: Parser<'a, Output1>,
     P2: Parser<'a, Output2>,
@@ -569,11 +560,16 @@ mod tests {
             Array(Vec<JsonValue>),
         }
 
-        fn token<'a, P>(parser: P) -> impl Parser<'a, String>
+        fn whitespace<'a>() -> impl Parser<'a, String> {
+            regex(r"\s*", 0)
+        }
+
+        fn token<'a, P, Output>(parser: P) -> impl Parser<'a, Output>
         where
-            P: Parser<'a, String>,
+            P: Parser<'a, Output>,
+            Output: Clone,
         {
-            skip(parser, regex(r"\s*", 0))
+            skip(parser, whitespace())
         }
 
         fn json_boolean<'a>() -> impl Parser<'a, JsonValue> {
@@ -804,7 +800,7 @@ mod tests {
         );
         assert_eq!(result.value(), JsonValue::Object(object));
 
-        let parser = then(regex(r"\s*", 0), json_elements());
+        let parser = then(whitespace(), json_elements());
         let result = parse(
             parser,
             r#"
