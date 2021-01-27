@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{Error, Write};
 use std::process::Command;
 use tempfile::tempdir;
+use uuid::Uuid;
 
 #[allow(unused_must_use)]
 fn status(input: &str) -> Result<i32, Error> {
@@ -14,23 +15,28 @@ fn status(input: &str) -> Result<i32, Error> {
 
     // Save output
     let dir = tempdir()?;
-    let mut src = File::create(dir.path().join("tmp.s"))?;
+    let bin_name = Uuid::new_v4().to_string();
+    let src_name = bin_name.clone() + ".s";
+    let mut src = File::create(dir.path().join(&src_name))?;
     writeln!(src, "{}", output)?;
 
     // Assemble
     let src_path = dir
         .path()
-        .join("tmp.s")
+        .join(&src_name)
         .into_os_string()
         .into_string()
         .unwrap();
-    Command::new("cc").args(&["-o", "tmp", &src_path]).output();
+    Command::new("cc")
+        .args(&["-o", &bin_name, &src_path])
+        .output();
 
     // Execute
-    let actual = Command::new("./tmp").status().unwrap().code().unwrap();
+    let bin_path = "./".to_string() + &bin_name;
+    let actual = Command::new(&bin_path).status().unwrap().code().unwrap();
 
     // Cleanup
-    fs::remove_file("./tmp")?;
+    fs::remove_file(&bin_path)?;
     drop(src);
     dir.close();
 
