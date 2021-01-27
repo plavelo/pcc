@@ -29,10 +29,16 @@ fn main() {
 
 #[derive(PartialEq, Debug, Clone)]
 enum OpKind {
-    Add,
-    Sub,
-    Mul,
-    Div,
+    Add, // +
+    Sub, // -
+    Mul, // *
+    Div, // /
+    Eq,  // ==
+    Ne,  // !=
+    Lt,  // <
+    Le,  // <=
+    Gt,  // >
+    Ge,  // >=
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -59,41 +65,127 @@ where
     skip(parser, whitespace())
 }
 
-/// expr    = mul ("+" mul | "-" mul)*
+/// expr       = equality
 #[derive(Clone)]
 struct Expr;
 impl<'a> Parser<'a, AST> for Expr {
     fn parse(&self, input: &'a str, position: usize) -> Result<Success<AST>, Failure> {
-        map(
-            and(
-                mul(),
-                many(or(
-                    map(then(token(string("+")), mul()), |input| {
-                        (OpKind::Add, input)
-                    }),
-                    map(then(token(string("-")), mul()), |input| {
-                        (OpKind::Sub, input)
-                    }),
-                )),
-            ),
-            |input| {
-                let (head, tail) = input;
-                let mut node = head;
-                for (kind, next_node) in tail.iter() {
-                    node = AST::Operator {
-                        kind: kind.clone(),
-                        lhs: Box::new(node),
-                        rhs: Box::new(next_node.clone()),
-                    }
-                }
-                node
-            },
-        )
-        .parse(input, position)
+        equality().parse(input, position)
     }
 }
 fn expr<'a>() -> impl Parser<'a, AST> {
     Expr
+}
+
+/// equality   = relational ("==" relational | "!=" relational)*
+fn equality<'a>() -> impl Parser<'a, AST> {
+    map(
+        and(
+            relational(),
+            many(or(
+                map(then(token(string("==")), relational()), |input| {
+                    (OpKind::Eq, input)
+                }),
+                map(then(token(string("!=")), relational()), |input| {
+                    (OpKind::Ne, input)
+                }),
+            )),
+        ),
+        |input| {
+            let (head, tail) = input;
+            let mut node = head;
+            for (kind, next_node) in tail.iter() {
+                node = AST::Operator {
+                    kind: kind.clone(),
+                    lhs: Box::new(node),
+                    rhs: Box::new(next_node.clone()),
+                }
+            }
+            node
+        },
+    )
+}
+
+/// relational = add ("<" add | "<=" add | ">" add | ">=" add)*
+fn relational<'a>() -> impl Parser<'a, AST> {
+    map(
+        and(
+            add(),
+            many(or(
+                map(then(token(string(">")), add()), |input| (OpKind::Gt, input)),
+                or(
+                    map(then(token(string(">=")), add()), |input| {
+                        (OpKind::Ge, input)
+                    }),
+                    or(
+                        map(then(token(string("<=")), add()), |input| {
+                            (OpKind::Le, input)
+                        }),
+                        map(then(token(string("<")), add()), |input| (OpKind::Lt, input)),
+                    ),
+                ),
+            )),
+        ),
+        |input| {
+            let (head, tail) = input;
+            let mut node = head;
+            for (kind, next_node) in tail.iter() {
+                node = match kind {
+                    OpKind::Lt => AST::Operator {
+                        kind: OpKind::Lt,
+                        lhs: Box::new(node),
+                        rhs: Box::new(next_node.clone()),
+                    },
+                    OpKind::Le => AST::Operator {
+                        kind: OpKind::Le,
+                        lhs: Box::new(node),
+                        rhs: Box::new(next_node.clone()),
+                    },
+                    OpKind::Gt => AST::Operator {
+                        kind: OpKind::Lt,
+                        lhs: Box::new(next_node.clone()),
+                        rhs: Box::new(node),
+                    },
+                    // must be OpKind::Ge
+                    _ => AST::Operator {
+                        kind: OpKind::Le,
+                        lhs: Box::new(next_node.clone()),
+                        rhs: Box::new(node),
+                    },
+                };
+            }
+            node
+        },
+    )
+}
+
+/// add        = mul ("+" mul | "-" mul)*
+fn add<'a>() -> impl Parser<'a, AST> {
+    map(
+        and(
+            mul(),
+            many(or(
+                map(then(token(string("+")), mul()), |input| {
+                    (OpKind::Add, input)
+                }),
+                map(then(token(string("-")), mul()), |input| {
+                    (OpKind::Sub, input)
+                }),
+            )),
+        ),
+        |input| {
+            let (head, tail) = input;
+            let mut node = head;
+            for (kind, next_node) in tail.iter() {
+                node = AST::Operator {
+                    kind: kind.clone(),
+                    lhs: Box::new(node),
+                    rhs: Box::new(next_node.clone()),
+                }
+            }
+            node
+        },
+    )
 }
 
 /// mul     = unary ("*" unary | "/" unary)*
@@ -167,20 +259,28 @@ fn gen(tree: AST) -> String {
         AST::Literal { value } => format!("    push {}\n", value),
         AST::Operator { kind, lhs, rhs } => [
             vec![
-                gen(*lhs),
-                gen(*rhs),
-                "    pop rdi\n".to_string(),
-                "    pop rax\n".to_string(),
+                gen(*lhs).as_str(),
+                &gen(*rhs).as_str(),
+                "    pop rdi\n",
+                "    pop rax\n",
             ],
             match kind {
-                OpKind::Add => vec!["    add rax, rdi\n".to_string()],
-                OpKind::Sub => vec!["    sub rax, rdi\n".to_string()],
-                OpKind::Mul => vec!["    imul rax, rdi\n".to_string()],
-                OpKind::Div => vec!["    cqo\n".to_string(), "    idiv rdi\n".to_string()],
+                OpKind::Add => vec!["    add rax, rdi\n"],
+                OpKind::Sub => vec!["    sub rax, rdi\n"],
+                OpKind::Mul => vec!["    imul rax, rdi\n"],
+                OpKind::Div => vec!["    cqo\n", "    idiv rdi\n"],
+                OpKind::Eq => vec!["  cmp rax, rdi\n", "  sete al\n", "  movzb rax, al\n"],
+                OpKind::Ne => vec!["  cmp rax, rdi\n", "  setne al\n", "  movzb rax, al\n"],
+                OpKind::Lt => vec!["  cmp rax, rdi\n", "  setl al\n", "  movzb rax, al\n"],
+                // must be OpKind::Le
+                _ => vec!["  cmp rax, rdi\n", "  setle al\n", "  movzb rax, al\n"],
             },
-            vec!["    push rax\n".to_string()],
+            vec!["    push rax\n"],
         ]
         .concat()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<String>>()
         .join(""),
     }
 }

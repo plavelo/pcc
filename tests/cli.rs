@@ -61,3 +61,25 @@ fn unary_op_ok() {
     assert_eq!(status(" 5 * ( +9 - -6 ) ").unwrap(), 75);
     assert_eq!(status(" -( -3 + -5 ) / 2 ").unwrap(), 4);
 }
+
+#[test]
+fn relational_op_ok() {
+    assert_eq!(status(" 1 == 1 ").unwrap(), 1);
+    assert_eq!(status(" 1 == 2 ").unwrap(), 0);
+    assert_eq!(status(" 1 != 1 ").unwrap(), 0);
+    assert_eq!(status(" 1 != 2 ").unwrap(), 1);
+    assert_eq!(status(" 1 < 0 ").unwrap(), 0);
+    assert_eq!(status(" 1 < 1 ").unwrap(), 0);
+    assert_eq!(status(" 1 < 2 ").unwrap(), 1);
+    assert_eq!(status(" 1 <= 0 ").unwrap(), 0);
+    assert_eq!(status(" 1 <= 1 ").unwrap(), 1);
+    assert_eq!(status(" 1 <= 2 ").unwrap(), 1);
+    assert_eq!(status(" 0 > 1 ").unwrap(), 0);
+    assert_eq!(status(" 1 > 1 ").unwrap(), 0);
+    assert_eq!(status(" 2 > 1 ").unwrap(), 1);
+    assert_eq!(status(" 0 >= 1 ").unwrap(), 0);
+    assert_eq!(status(" 1 >= 1 ").unwrap(), 1);
+    assert_eq!(status(" 2 >= 1 ").unwrap(), 1);
+    assert_eq!(status(" -( -3 + -5 ) / 2 == 4 ").unwrap(), 1);
+    assert_eq!(status(" -( -3 + -5 ) / 2 == 5 ").unwrap(), 0);
+}
