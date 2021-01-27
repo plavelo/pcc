@@ -54,3 +54,10 @@ fn expr_ok() {
     assert_eq!(status(" 5 * ( 9 - 6 ) ").unwrap(), 15);
     assert_eq!(status(" ( 3 + 5 ) / 2 ").unwrap(), 4);
 }
+
+#[test]
+fn unary_op_ok() {
+    assert_eq!(status(" -5 + 6 * 7 ").unwrap(), 37);
+    assert_eq!(status(" 5 * ( +9 - -6 ) ").unwrap(), 75);
+    assert_eq!(status(" -( -3 + -5 ) / 2 ").unwrap(), 4);
+}
