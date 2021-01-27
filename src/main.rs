@@ -187,12 +187,14 @@ fn gen(tree: AST) -> String {
 
 fn error(source: &str, position: usize, expected: Vec<String>) -> String {
     vec![
+        "Failed to compile:\n".to_string(),
         source.to_string(),
         "\n".to_string(),
         " ".repeat(position),
         "^\n".to_string(),
         " ".repeat(position),
-        expected.join(""),
+        "expected: ".to_string(),
+        expected.join(", "),
     ]
     .join("")
 }
