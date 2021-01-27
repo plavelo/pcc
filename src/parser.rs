@@ -41,7 +41,6 @@ impl<Output: Clone> ParseResult<Output> for Result<Success<Output>, Failure> {
     }
 }
 
-#[allow(dead_code)]
 fn merge_results<Output>(
     curr: Result<Success<Output>, Failure>,
     last: Result<Success<Output>, Failure>,
@@ -59,13 +58,13 @@ where
     }
 }
 
-pub trait Parser<'a, Output: Clone> {
+pub trait Parser<'a, Output: Clone>: Clone {
     fn parse(&self, input: &'a str, position: usize) -> Result<Success<Output>, Failure>;
 }
 
 impl<'a, F, Output> Parser<'a, Output> for F
 where
-    F: Fn(&'a str, usize) -> Result<Success<Output>, Failure>,
+    F: Fn(&'a str, usize) -> Result<Success<Output>, Failure> + Clone,
     Output: Clone,
 {
     fn parse(&self, input: &'a str, position: usize) -> Result<Success<Output>, Failure> {
@@ -136,6 +135,26 @@ where
     }
 }
 
+#[allow(dead_code)]
+pub fn at_least<'a, P, Output>(parser: P, n: usize) -> impl Parser<'a, Vec<Output>>
+where
+    P: Parser<'a, Output>,
+    Output: Clone,
+{
+    map(and(times(parser.clone(), n, n), many(parser)), |input| {
+        [input.0, input.1].concat()
+    })
+}
+
+#[allow(dead_code)]
+pub fn at_most<'a, P, Output>(parser: P, n: usize) -> impl Parser<'a, Vec<Output>>
+where
+    P: Parser<'a, Output>,
+    Output: Clone,
+{
+    times(parser, 0, n)
+}
+
 pub fn or<'a, P1, P2, Output>(parser1: P1, parser2: P2) -> impl Parser<'a, Output>
 where
     P1: Parser<'a, Output>,
@@ -157,17 +176,11 @@ where
     Output: Clone,
 {
     move |source: &'a str, position| -> Result<Success<Vec<Output>>, Failure> {
-        let mut result = parser.parse(&source, position);
-        if result.is_err() {
-            return Ok(Success {
-                position,
-                value: vec![],
-            });
-        }
-        let mut pos = result.position();
-        let mut acc: Vec<Output> = vec![result.value()];
+        let mut result: Result<Success<Output>, Failure>;
+        let mut pos = position;
+        let mut acc: Vec<Output> = vec![];
         loop {
-            result = merge_results(parser.parse(&source, pos), result);
+            result = parser.parse(&source, pos);
             if result.is_ok() {
                 pos = result.position();
                 acc.push(result.value());
@@ -184,7 +197,7 @@ where
 pub fn map<'a, P, F, Input, Output>(parser: P, func: F) -> impl Parser<'a, Output>
 where
     P: Parser<'a, Input>,
-    F: Fn(Input) -> Output,
+    F: Fn(Input) -> Output + Clone,
     Input: Clone,
     Output: Clone,
 {
@@ -234,33 +247,15 @@ where
     OutputP: Clone,
     OutputS: Clone,
 {
-    move |source: &'a str, position| -> Result<Success<Vec<OutputP>>, Failure> {
-        let mut result = parser.parse(&source, position);
-        if result.is_err() {
-            return Ok(Success {
+    or(
+        sep_by1(parser, separator),
+        move |_, position| -> Result<Success<Vec<OutputP>>, Failure> {
+            Ok(Success {
                 position,
                 value: vec![],
-            });
-        }
-        let mut pos;
-        let mut acc: Vec<OutputP> = vec![];
-        loop {
-            pos = result.position();
-            acc.push(result.value());
-            let sep_result = separator.parse(&source, pos);
-            if sep_result.is_err() {
-                break;
-            }
-            result = parser.parse(&source, sep_result.position());
-            if result.is_err() {
-                break;
-            }
-        }
-        Ok(Success {
-            position: pos,
-            value: acc,
-        })
-    }
+            })
+        },
+    )
 }
 
 #[allow(dead_code)]
@@ -343,6 +338,41 @@ where
     map(and(parser1, parser2), move |value| value.1)
 }
 
+pub fn times<'a, P, Output>(parser: P, min: usize, max: usize) -> impl Parser<'a, Vec<Output>>
+where
+    P: Parser<'a, Output>,
+    Output: Clone,
+{
+    move |source: &'a str, position| -> Result<Success<Vec<Output>>, Failure> {
+        let mut result: Result<Success<Output>, Failure>;
+        let mut pos = position;
+        let mut acc: Vec<Output> = vec![];
+        for _ in 0..min {
+            result = parser.parse(&source, pos);
+            if result.is_err() {
+                return Err(Failure {
+                    position: pos,
+                    expected: result.expected(),
+                });
+            }
+            pos = result.position();
+            acc.push(result.value());
+        }
+        for _ in min..max {
+            result = parser.parse(&source, pos);
+            if result.is_err() {
+                break;
+            }
+            pos = result.position();
+            acc.push(result.value());
+        }
+        Ok(Success {
+            position: pos,
+            value: acc,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,6 +395,66 @@ mod tests {
         let result = parse(parser, "key:valu");
         assert_eq!(result.is_ok(), false);
         assert_eq!(result.position(), 4);
+    }
+
+    #[test]
+    fn at_least_ok() {
+        let parser = at_least(string("x"), 0);
+        let result = parse(parser, "");
+        assert_eq!(result.is_ok(), true);
+        let empty: Vec<String> = vec![];
+        assert_eq!(result.value(), empty);
+
+        let parser = at_least(string("x"), 1);
+        let result = parse(parser, "x");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), vec!["x".to_string()]);
+
+        let parser = at_least(string("x"), 1);
+        let result = parse(parser, "xx");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), vec!["x".to_string(), "x".to_string()]);
+    }
+
+    #[test]
+    fn at_least_error() {
+        let parser = at_least(string("x"), 1);
+        let result = parse(parser, "");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.position(), 0);
+
+        let parser = at_least(string("x"), 2);
+        let result = parse(parser, "x");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.position(), 1);
+    }
+
+    #[test]
+    fn at_most_ok() {
+        let parser = at_most(string("x"), 0);
+        let result = parse(parser, "");
+        assert_eq!(result.is_ok(), true);
+        let empty: Vec<String> = vec![];
+        assert_eq!(result.value(), empty);
+
+        let parser = at_most(string("x"), 1);
+        let result = parse(parser, "");
+        assert_eq!(result.is_ok(), true);
+        let empty: Vec<String> = vec![];
+        assert_eq!(result.value(), empty);
+
+        let parser = at_most(string("x"), 1);
+        let result = parse(parser, "x");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), vec!["x".to_string()]);
+    }
+
+    #[test]
+    fn at_most_error() {
+        let parser = at_most(string("x"), 1);
+        let result = parse(parser, "xx");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.position(), 1);
     }
 
     #[test]
@@ -550,6 +640,59 @@ mod tests {
     }
 
     #[test]
+    fn times_ok() {
+        let parser = times(string("x"), 0, 0);
+        let result = parse(parser, "");
+        assert_eq!(result.is_ok(), true);
+        let empty: Vec<String> = vec![];
+        assert_eq!(result.value(), empty);
+
+        let parser = times(string("x"), 0, 1);
+        let result = parse(parser, "");
+        assert_eq!(result.is_ok(), true);
+        let empty: Vec<String> = vec![];
+        assert_eq!(result.value(), empty);
+
+        let parser = times(string("x"), 0, 1);
+        let result = parse(parser, "x");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), vec!["x".to_string()]);
+
+        let parser = times(string("x"), 1, 2);
+        let result = parse(parser, "x");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), vec!["x".to_string()]);
+
+        let parser = times(string("x"), 1, 2);
+        let result = parse(parser, "xx");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), vec!["x".to_string(), "x".to_string()]);
+    }
+
+    #[test]
+    fn times_error() {
+        let parser = times(string("x"), 0, 0);
+        let result = parse(parser, "x");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.position(), 0);
+
+        let parser = times(string("x"), 0, 1);
+        let result = parse(parser, "xx");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.position(), 1);
+
+        let parser = times(string("x"), 2, 3);
+        let result = parse(parser, "x");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.position(), 1);
+
+        let parser = times(string("x"), 2, 3);
+        let result = parse(parser, "xxxx");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.position(), 3);
+    }
+
+    #[test]
     fn json_ok() {
         #[derive(PartialEq, Debug, Clone)]
         enum JsonValue {
@@ -715,6 +858,7 @@ mod tests {
         object.insert("key2".to_string(), JsonValue::String("value".to_string()));
         assert_eq!(result.value(), JsonValue::Object(object));
 
+        #[derive(Clone)]
         struct JsonElements;
         impl<'a> Parser<'a, JsonValue> for JsonElements {
             fn parse(
