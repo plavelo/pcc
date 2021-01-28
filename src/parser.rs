@@ -108,29 +108,23 @@ where
     Output2: Clone,
 {
     move |source: &'a str, position| -> Result<Success<(Output1, Output2)>, Failure> {
-        let result = parser1.parse(&source, position);
-        if result.is_err() {
+        let result1 = parser1.parse(&source, position);
+        if result1.is_err() {
             return Err(Failure {
-                position: result.position(),
-                expected: result.expected(),
+                position: result1.position(),
+                expected: result1.expected(),
             });
         }
-        let mut pos = result.position();
-        let value1 = result.value();
-
-        let result = parser2.parse(&source, pos);
-        if result.is_err() {
+        let result2 = parser2.parse(&source, result1.position());
+        if result2.is_err() {
             return Err(Failure {
-                position: result.position(),
-                expected: result.expected(),
+                position: result2.position(),
+                expected: result2.expected(),
             });
         }
-        pos = result.position();
-        let value2 = result.value();
-
         Ok(Success {
-            position: pos,
-            value: (value1, value2),
+            position: result2.position(),
+            value: (result1.value(), result2.value()),
         })
     }
 }
@@ -176,17 +170,16 @@ where
     Output: Clone,
 {
     move |source: &'a str, position| -> Result<Success<Vec<Output>>, Failure> {
-        let mut result: Result<Success<Output>, Failure>;
         let mut pos = position;
-        let mut acc: Vec<Output> = vec![];
+        let mut acc = vec![];
         loop {
-            result = parser.parse(&source, pos);
+            let result = parser.parse(&source, pos);
             if result.is_ok() {
                 pos = result.position();
                 acc.push(result.value());
                 continue;
             }
-            return Ok(Success {
+            break Ok(Success {
                 position: pos,
                 value: acc,
             });
@@ -275,7 +268,7 @@ where
             });
         }
         let mut pos;
-        let mut acc: Vec<OutputP> = vec![];
+        let mut acc = vec![];
         loop {
             pos = result.position();
             acc.push(result.value());
@@ -344,11 +337,10 @@ where
     Output: Clone,
 {
     move |source: &'a str, position| -> Result<Success<Vec<Output>>, Failure> {
-        let mut result: Result<Success<Output>, Failure>;
         let mut pos = position;
-        let mut acc: Vec<Output> = vec![];
+        let mut acc = vec![];
         for _ in 0..min {
-            result = parser.parse(&source, pos);
+            let result = parser.parse(&source, pos);
             if result.is_err() {
                 return Err(Failure {
                     position: pos,
@@ -359,7 +351,7 @@ where
             acc.push(result.value());
         }
         for _ in min..max {
-            result = parser.parse(&source, pos);
+            let result = parser.parse(&source, pos);
             if result.is_err() {
                 break;
             }
