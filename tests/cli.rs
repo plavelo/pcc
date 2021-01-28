@@ -45,41 +45,56 @@ fn status(input: &str) -> Result<i32, Error> {
 
 #[test]
 fn number_ok() {
-    assert_eq!(status("1").unwrap(), 1);
+    assert_eq!(status("1;").unwrap(), 1);
 }
 
 #[test]
 fn expr_ok() {
-    assert_eq!(status(" 5 + 6 * 7 ").unwrap(), 47);
-    assert_eq!(status(" 5 * ( 9 - 6 ) ").unwrap(), 15);
-    assert_eq!(status(" ( 3 + 5 ) / 2 ").unwrap(), 4);
+    assert_eq!(status(" 5 + 6 * 7 ;").unwrap(), 47);
+    assert_eq!(status(" 5 * ( 9 - 6 ) ;").unwrap(), 15);
+    assert_eq!(status(" ( 3 + 5 ) / 2 ;").unwrap(), 4);
 }
 
 #[test]
 fn unary_op_ok() {
-    assert_eq!(status(" -5 + 6 * 7 ").unwrap(), 37);
-    assert_eq!(status(" 5 * ( +9 - -6 ) ").unwrap(), 75);
-    assert_eq!(status(" -( -3 + -5 ) / 2 ").unwrap(), 4);
+    assert_eq!(status(" -5 + 6 * 7 ;").unwrap(), 37);
+    assert_eq!(status(" 5 * ( +9 - -6 ) ;").unwrap(), 75);
+    assert_eq!(status(" -( -3 + -5 ) / 2 ;").unwrap(), 4);
 }
 
 #[test]
 fn relational_op_ok() {
-    assert_eq!(status(" 1 == 1 ").unwrap(), 1);
-    assert_eq!(status(" 1 == 2 ").unwrap(), 0);
-    assert_eq!(status(" 1 != 1 ").unwrap(), 0);
-    assert_eq!(status(" 1 != 2 ").unwrap(), 1);
-    assert_eq!(status(" 1 < 0 ").unwrap(), 0);
-    assert_eq!(status(" 1 < 1 ").unwrap(), 0);
-    assert_eq!(status(" 1 < 2 ").unwrap(), 1);
-    assert_eq!(status(" 1 <= 0 ").unwrap(), 0);
-    assert_eq!(status(" 1 <= 1 ").unwrap(), 1);
-    assert_eq!(status(" 1 <= 2 ").unwrap(), 1);
-    assert_eq!(status(" 0 > 1 ").unwrap(), 0);
-    assert_eq!(status(" 1 > 1 ").unwrap(), 0);
-    assert_eq!(status(" 2 > 1 ").unwrap(), 1);
-    assert_eq!(status(" 0 >= 1 ").unwrap(), 0);
-    assert_eq!(status(" 1 >= 1 ").unwrap(), 1);
-    assert_eq!(status(" 2 >= 1 ").unwrap(), 1);
-    assert_eq!(status(" -( -3 + -5 ) / 2 == 4 ").unwrap(), 1);
-    assert_eq!(status(" -( -3 + -5 ) / 2 == 5 ").unwrap(), 0);
+    assert_eq!(status(" 1 == 1 ;").unwrap(), 1);
+    assert_eq!(status(" 1 == 2 ;").unwrap(), 0);
+    assert_eq!(status(" 1 != 1 ;").unwrap(), 0);
+    assert_eq!(status(" 1 != 2 ;").unwrap(), 1);
+    assert_eq!(status(" 1 < 0 ;").unwrap(), 0);
+    assert_eq!(status(" 1 < 1 ;").unwrap(), 0);
+    assert_eq!(status(" 1 < 2 ;").unwrap(), 1);
+    assert_eq!(status(" 1 <= 0 ;").unwrap(), 0);
+    assert_eq!(status(" 1 <= 1 ;").unwrap(), 1);
+    assert_eq!(status(" 1 <= 2 ;").unwrap(), 1);
+    assert_eq!(status(" 0 > 1 ;").unwrap(), 0);
+    assert_eq!(status(" 1 > 1 ;").unwrap(), 0);
+    assert_eq!(status(" 2 > 1 ;").unwrap(), 1);
+    assert_eq!(status(" 0 >= 1 ;").unwrap(), 0);
+    assert_eq!(status(" 1 >= 1 ;").unwrap(), 1);
+    assert_eq!(status(" 2 >= 1 ;").unwrap(), 1);
+    assert_eq!(status(" -( -3 + -5 ) / 2 == 4 ;").unwrap(), 1);
+    assert_eq!(status(" -( -3 + -5 ) / 2 == 5 ;").unwrap(), 0);
+}
+
+#[test]
+fn variable_ok() {
+    assert_eq!(
+        status(
+            r#"
+            a = 3;
+            b = 5 * 6 - 8;
+            a + b / 2;
+            "#
+        )
+        .unwrap(),
+        14,
+    );
 }
