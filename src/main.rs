@@ -2,6 +2,7 @@ mod parser;
 
 use clap::Clap;
 use parser::*;
+use std::collections::HashMap;
 
 #[derive(Clap)]
 struct Opts {
@@ -19,6 +20,13 @@ fn main() {
 }
 
 fn convert(asts: Vec<AST>) -> String {
+    let mut vars = HashMap::new();
+    let mut acc = vec![];
+    for ast in asts {
+        let (gen, new_vars) = gen(ast, vars);
+        vars = new_vars;
+        acc.push(gen + "\n  pop rax");
+    }
     vec![
         ".intel_syntax noprefix",
         ".globl main",
@@ -27,11 +35,7 @@ fn convert(asts: Vec<AST>) -> String {
         "  push rbp",
         "  mov rbp, rsp",
         "  sub rsp, 208",
-        asts.into_iter()
-            .map(|ast| vec![gen(ast).as_str(), "  pop rax"].join("\n"))
-            .collect::<Vec<String>>()
-            .join("\n")
-            .as_str(),
+        acc.join("\n").as_str(),
         // epilogue
         "  mov rsp, rbp",
         "  pop rbp",
@@ -73,7 +77,7 @@ enum AST {
         value: usize,
     },
     Variable {
-        offset: usize,
+        name: String,
     },
     Assign {
         lhs: Box<AST>,
@@ -81,61 +85,89 @@ enum AST {
     },
 }
 
-fn gen_lval(tree: AST) -> String {
+fn gen_lvar(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String, usize>) {
     match tree {
-        AST::Variable { offset } => vec![
-            "  mov rax, rbp",
-            format!("  sub rax, {}", offset).as_str(),
-            "  push rax",
-        ]
-        .join("\n"),
+        AST::Variable { name } => {
+            let (offset, new_vars) = match vars.get(&name) {
+                Some(offset) => (*offset, vars),
+                None => {
+                    let next_offset = match vars.values().max() {
+                        Some(offset) => offset + 8,
+                        None => 8,
+                    };
+                    let next_vars = vars
+                        .into_iter()
+                        .chain(vec![(name.clone(), next_offset)])
+                        .collect();
+                    (next_offset, next_vars)
+                }
+            };
+            (
+                vec![
+                    "  mov rax, rbp",
+                    format!("  sub rax, {}", offset).as_str(),
+                    "  push rax",
+                ]
+                .join("\n"),
+                new_vars,
+            )
+        }
         _ => panic!("The left side value of the assignment is not a variable."),
     }
 }
 
-fn gen(tree: AST) -> String {
+fn gen(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String, usize>) {
     match tree {
-        AST::Literal { value } => format!("  push {}", value),
-        AST::Variable { offset: _ } => vec![
-            gen_lval(tree).as_str(),
-            "  pop rax",
-            "  mov rax, [rax]",
-            "  push rax",
-        ]
-        .join("\n"),
-        AST::Assign { lhs, rhs } => vec![
-            gen_lval(*lhs).as_str(),
-            gen(*rhs).as_str(),
-            "  pop rdi",
-            "  pop rax",
-            "  mov [rax], rdi",
-            "  push rdi",
-        ]
-        .join("\n"),
-        AST::Operator { kind, lhs, rhs } => [
-            vec![
-                gen(*lhs).as_str(),
-                gen(*rhs).as_str(),
-                "  pop rdi",
-                "  pop rax",
-            ],
-            match kind {
-                OpKind::Add => vec!["  add rax, rdi"],
-                OpKind::Sub => vec!["  sub rax, rdi"],
-                OpKind::Mul => vec!["  imul rax, rdi"],
-                OpKind::Div => vec!["  cqo", "  idiv rdi"],
-                OpKind::Eq => vec!["  cmp rax, rdi", "  sete al", "  movzb rax, al"],
-                OpKind::Ne => vec!["  cmp rax, rdi", "  setne al", "  movzb rax, al"],
-                OpKind::Lt => vec!["  cmp rax, rdi", "  setl al", "  movzb rax, al"],
-                OpKind::Le => vec!["  cmp rax, rdi", "  setle al", "  movzb rax, al"],
-            },
-            vec!["  push rax"],
-        ]
-        .concat()
-        .into_iter()
-        .map(|s| s.to_string())
-        .collect::<Vec<String>>()
-        .join("\n"),
+        AST::Literal { value } => (format!("  push {}", value), vars),
+        AST::Variable { name: _ } => {
+            let (gen, new_vars) = gen_lvar(tree, vars);
+            (
+                vec![gen.as_str(), "  pop rax", "  mov rax, [rax]", "  push rax"].join("\n"),
+                new_vars,
+            )
+        }
+        AST::Assign { lhs, rhs } => {
+            let (lhs_gen, lhs_vars) = gen_lvar(*lhs, vars);
+            let (rhs_gen, rhs_vars) = gen(*rhs, lhs_vars);
+            (
+                vec![
+                    lhs_gen.as_str(),
+                    rhs_gen.as_str(),
+                    "  pop rdi",
+                    "  pop rax",
+                    "  mov [rax], rdi",
+                    "  push rdi",
+                ]
+                .join("\n"),
+                rhs_vars,
+            )
+        }
+        AST::Operator { kind, lhs, rhs } => {
+            let (lhs_gen, lhs_vars) = gen(*lhs, vars);
+            let (rhs_gen, rhs_vars) = gen(*rhs, lhs_vars);
+            (
+                [
+                    vec![lhs_gen.as_str(), rhs_gen.as_str(), "  pop rdi", "  pop rax"],
+                    match kind {
+                        OpKind::Add => vec!["  add rax, rdi"],
+                        OpKind::Sub => vec!["  sub rax, rdi"],
+                        OpKind::Mul => vec!["  imul rax, rdi"],
+                        OpKind::Div => vec!["  cqo", "  idiv rdi"],
+                        OpKind::Eq => vec!["  cmp rax, rdi", "  sete al", "  movzb rax, al"],
+                        OpKind::Ne => vec!["  cmp rax, rdi", "  setne al", "  movzb rax, al"],
+                        OpKind::Lt => vec!["  cmp rax, rdi", "  setl al", "  movzb rax, al"],
+                        OpKind::Le => vec!["  cmp rax, rdi", "  setle al", "  movzb rax, al"],
+                    },
+                    vec!["  push rax"],
+                ]
+                .concat()
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>()
+                .join("\n"),
+                rhs_vars,
+            )
+        }
     }
 }
 
@@ -330,8 +362,8 @@ fn num<'a>() -> impl Parser<'a, AST> {
 }
 
 fn ident<'a>() -> impl Parser<'a, AST> {
-    map(token(regex("[a-z]", 0)), |input| AST::Variable {
-        offset: ("abcdefghijklmnopqrstuvwxyz".find(&input).unwrap() + 1) * 8,
+    map(token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)), |input| {
+        AST::Variable { name: input }
     })
 }
 

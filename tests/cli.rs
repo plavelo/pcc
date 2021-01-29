@@ -97,4 +97,16 @@ fn variable_ok() {
         .unwrap(),
         14,
     );
+
+    assert_eq!(
+        status(
+            r#"
+            first = 3;
+            second = 5 * 6 - 8;
+            3 * first + second / 2;
+            "#
+        )
+        .unwrap(),
+        20,
+    );
 }
