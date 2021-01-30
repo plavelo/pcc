@@ -140,7 +140,6 @@ where
     })
 }
 
-#[allow(dead_code)]
 pub fn at_most<'a, P, Output>(parser: P, n: usize) -> impl Parser<'a, Vec<Output>>
 where
     P: Parser<'a, Output>,
@@ -208,6 +207,35 @@ where
             })
         }
     }
+}
+
+pub fn not_followed_by<'a, P1, P2, Output1, Output2>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Parser<'a, Output1>
+where
+    P1: Parser<'a, Output1>,
+    P2: Parser<'a, Output2>,
+    Output1: Clone,
+    Output2: Clone,
+{
+    skip(
+        parser1,
+        move |source: &'a str, position| -> Result<Success<()>, Failure> {
+            let result = parser2.parse(source, position);
+            if result.is_ok() {
+                Err(Failure {
+                    position,
+                    expected: vec![format!("not '{}'", &source[position..result.position()])],
+                })
+            } else {
+                Ok(Success {
+                    position,
+                    value: (),
+                })
+            }
+        },
+    )
 }
 
 pub fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a, String> {
@@ -493,6 +521,22 @@ mod tests {
         let result = parse(parser, "xxxxxy");
         assert_eq!(result.is_ok(), false);
         assert_eq!(result.position(), 5);
+    }
+
+    #[test]
+    fn not_followed_by_ok() {
+        let parser = and(not_followed_by(string("x"), string("z")), regex(".", 0));
+        let result = parse(parser, "xy");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(result.value(), ("x".to_string(), "y".to_string()));
+    }
+
+    #[test]
+    fn not_followed_by_error() {
+        let parser = and(not_followed_by(string("x"), string("z")), regex(".", 0));
+        let result = parse(parser, "xz");
+        assert_eq!(result.is_ok(), false);
+        assert_eq!(result.position(), 1);
     }
 
     #[test]

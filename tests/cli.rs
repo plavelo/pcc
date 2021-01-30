@@ -110,3 +110,25 @@ fn variable_ok() {
         20,
     );
 }
+
+#[test]
+fn return_ok() {
+    assert_eq!(status("return 3;").unwrap(), 3);
+    assert_eq!(status("return (3);").unwrap(), 3);
+    assert_eq!(status("return(3);").unwrap(), 3);
+    assert_eq!(status("return\n3;").unwrap(), 3);
+    assert_eq!(status("return\n(3);").unwrap(), 3);
+    assert_eq!(status("return 3; return 4;").unwrap(), 3);
+    assert_eq!(status("return 3 + 3 * 4;").unwrap(), 15);
+    assert_eq!(
+        status(
+            r#"
+            first = 3 * 5;
+            second = 20 - first;
+            return second * 2;
+            "#
+        )
+        .unwrap(),
+        10
+    );
+}
