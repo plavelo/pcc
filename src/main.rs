@@ -83,6 +83,9 @@ enum AST {
         lhs: Box<AST>,
         rhs: Box<AST>,
     },
+    Return {
+        lhs: Box<AST>,
+    },
 }
 
 fn gen_lvar(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String, usize>) {
@@ -142,6 +145,20 @@ fn gen(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String, usiz
                 rhs_vars,
             )
         }
+        AST::Return { lhs } => {
+            let (lhs_gen, lhs_vars) = gen(*lhs, vars);
+            (
+                vec![
+                    lhs_gen.as_str(),
+                    "  pop rax",
+                    "  mov rsp, rbp",
+                    "  pop rbp",
+                    "  ret",
+                ]
+                .join("\n"),
+                lhs_vars,
+            )
+        }
         AST::Operator { kind, lhs, rhs } => {
             let (lhs_gen, lhs_vars) = gen(*lhs, vars);
             let (rhs_gen, rhs_vars) = gen(*rhs, lhs_vars);
@@ -189,8 +206,23 @@ fn program<'a>() -> impl Parser<'a, Vec<AST>> {
 }
 
 /// stmt       = expr ";"
+///            | "return" expr ";"
 fn stmt<'a>() -> impl Parser<'a, AST> {
-    skip(expr(), token(string(";")))
+    or(
+        skip(expr(), token(string(";"))),
+        map(
+            skip(
+                then(
+                    token(not_followed_by(string("return"), regex("[a-zA-Z0-9_]", 0))),
+                    expr(),
+                ),
+                token(string(";")),
+            ),
+            move |input| AST::Return {
+                lhs: Box::new(input),
+            },
+        ),
+    )
 }
 
 /// expr       = assign
