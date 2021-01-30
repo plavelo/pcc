@@ -27,14 +27,15 @@ fn convert(asts: Vec<AST>) -> String {
         vars = new_vars;
         acc.push(gen + "\n  pop rax");
     }
+    let allocation = vars.values().max().unwrap_or(&0);
     vec![
         ".intel_syntax noprefix",
         ".globl main",
         "main:",
-        // prologue, allocate memory for 26 variables
+        // prologue, allocate memory for variables
         "  push rbp",
         "  mov rbp, rsp",
-        "  sub rsp, 208",
+        format!("  sub rsp, {}", allocation).as_str(),
         acc.join("\n").as_str(),
         // epilogue
         "  mov rsp, rbp",
