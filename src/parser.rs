@@ -291,7 +291,7 @@ where
         let mut result = parser.parse(&source, position);
         if result.is_err() {
             return Err(Failure {
-                position,
+                position: result.position(),
                 expected: result.expected(),
             });
         }

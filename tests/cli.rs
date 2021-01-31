@@ -27,9 +27,13 @@ fn status(input: &str) -> Result<i32, Error> {
         .into_os_string()
         .into_string()
         .unwrap();
-    Command::new("cc")
+    let result = Command::new("cc")
         .args(&["-o", &bin_name, &src_path])
-        .output();
+        .output()
+        .unwrap();
+    if !result.status.success() {
+        println!("{}", String::from_utf8(result.stderr).unwrap());
+    }
 
     // Execute
     let bin_path = "./".to_string() + &bin_name;
@@ -45,7 +49,7 @@ fn status(input: &str) -> Result<i32, Error> {
 
 #[test]
 fn number_ok() {
-    assert_eq!(status("1;").unwrap(), 1);
+    assert_eq!(status("return 1;").unwrap(), 1);
 }
 
 #[test]
@@ -97,7 +101,6 @@ fn variable_ok() {
         .unwrap(),
         14,
     );
-
     assert_eq!(
         status(
             r#"
@@ -129,6 +132,96 @@ fn return_ok() {
             "#
         )
         .unwrap(),
-        10
+        10,
+    );
+}
+
+#[test]
+fn if_ok() {
+    assert_eq!(
+        status(
+            r#"
+            first = 2;
+            second = 0;
+            if (first < 3)
+                second = first / 2;
+            return second;
+            "#
+        )
+        .unwrap(),
+        1,
+    );
+    assert_eq!(
+        status(
+            r#"
+            first = 4;
+            second = 0;
+            if (first < 3)
+                second = first / 2;
+            return second;
+            "#
+        )
+        .unwrap(),
+        0,
+    );
+    assert_eq!(
+        status(
+            r#"
+            first = 4;
+            if (first < 3)
+                second = first / 2;
+            else
+                second = first * 2;
+            return second;
+            "#
+        )
+        .unwrap(),
+        8,
+    );
+    assert_eq!(
+        status(
+            r#"
+            first = 2;
+            if (first < 3)
+                second = first / 2;
+            else
+                second = first * 2;
+            return second;
+            "#
+        )
+        .unwrap(),
+        1,
+    );
+}
+
+#[test]
+fn while_ok() {
+    assert_eq!(
+        status(
+            r#"
+            first = 0;
+            while (first < 10)
+                first = first + 1;
+            return first;
+            "#
+        )
+        .unwrap(),
+        10,
+    );
+}
+
+#[test]
+fn for_ok() {
+    assert_eq!(
+        status(
+            r#"
+            second = 0;
+            for (first = 0; first < 10; first = first + 1)
+                second = first;
+            return second;
+            "#
+        )
+        .unwrap(),
+        9,
     );
 }

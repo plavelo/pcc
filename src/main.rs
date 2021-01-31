@@ -14,18 +14,20 @@ fn main() {
     let parser = then(whitespace(), program());
     let result = parse(parser, &input);
     match result {
-        Ok(success) => println!("{}", convert(success.value)),
+        Ok(success) => println!("{}", generate(success.value)),
         Err(failure) => panic!("{}", error(&input, failure.position, failure.expected)),
     };
 }
 
-fn convert(asts: Vec<AST>) -> String {
+fn generate(asts: Vec<AST>) -> String {
     let mut vars = HashMap::new();
     let mut acc = vec![];
+    let mut counter = 0;
     for ast in asts {
-        let (gen, new_vars) = gen(ast, vars);
-        vars = new_vars;
-        acc.push(gen + "\n  pop rax");
+        let (gen, next_vars, next_counter) = gen(ast, vars, counter);
+        vars = next_vars;
+        counter = next_counter;
+        acc.push(gen);
     }
     let allocation = vars.values().max().unwrap_or(&0);
     vec![
@@ -84,6 +86,21 @@ enum AST {
         lhs: Box<AST>,
         rhs: Box<AST>,
     },
+    If {
+        cond: Box<AST>,
+        then: Box<AST>,
+        els: Box<Option<AST>>,
+    },
+    While {
+        cond: Box<AST>,
+        then: Box<AST>,
+    },
+    For {
+        init: Box<Option<AST>>,
+        cond: Box<Option<AST>>,
+        inc: Box<Option<AST>>,
+        then: Box<AST>,
+    },
     Return {
         lhs: Box<AST>,
     },
@@ -92,7 +109,7 @@ enum AST {
 fn gen_lvar(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String, usize>) {
     match tree {
         AST::Variable { name } => {
-            let (offset, new_vars) = match vars.get(&name) {
+            let (next_offset, next_vars) = match vars.get(&name) {
                 Some(offset) => (*offset, vars),
                 None => {
                     let next_offset = match vars.values().max() {
@@ -109,30 +126,35 @@ fn gen_lvar(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String,
             (
                 vec![
                     "  mov rax, rbp",
-                    format!("  sub rax, {}", offset).as_str(),
+                    format!("  sub rax, {}", next_offset).as_str(),
                     "  push rax",
                 ]
                 .join("\n"),
-                new_vars,
+                next_vars,
             )
         }
         _ => panic!("The left side value of the assignment is not a variable."),
     }
 }
 
-fn gen(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String, usize>) {
+fn gen(
+    tree: AST,
+    vars: HashMap<String, usize>,
+    counter: usize,
+) -> (String, HashMap<String, usize>, usize) {
     match tree {
-        AST::Literal { value } => (format!("  push {}", value), vars),
+        AST::Literal { value } => (format!("  push {}", value), vars, counter),
         AST::Variable { name: _ } => {
-            let (gen, new_vars) = gen_lvar(tree, vars);
+            let (gen, next_vars) = gen_lvar(tree, vars);
             (
                 vec![gen.as_str(), "  pop rax", "  mov rax, [rax]", "  push rax"].join("\n"),
-                new_vars,
+                next_vars,
+                counter,
             )
         }
         AST::Assign { lhs, rhs } => {
             let (lhs_gen, lhs_vars) = gen_lvar(*lhs, vars);
-            let (rhs_gen, rhs_vars) = gen(*rhs, lhs_vars);
+            let (rhs_gen, rhs_vars, rhs_counter) = gen(*rhs, lhs_vars, counter);
             (
                 vec![
                     lhs_gen.as_str(),
@@ -144,10 +166,136 @@ fn gen(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String, usiz
                 ]
                 .join("\n"),
                 rhs_vars,
+                rhs_counter,
+            )
+        }
+        AST::If { cond, then, els } => {
+            let els_label = format!(".Lelse{}", counter);
+            let end_label = format!(".Lend{}", counter + 1);
+            let next_counter = counter + 2;
+            let (cond_gen, cond_vars, cond_counter) = gen(*cond, vars, next_counter);
+            let (then_gen, then_vars, then_counter) = gen(*then, cond_vars, cond_counter);
+            let (els_gen, els_vars, els_counter) = if let Some(ast) = *els {
+                let (g, v, c) = gen(ast, then_vars, then_counter);
+                (
+                    vec![
+                        format!("  je {}", els_label),
+                        then_gen,
+                        format!("  jmp {}", end_label),
+                        format!("{}:", els_label),
+                        g,
+                    ]
+                    .join("\n"),
+                    v,
+                    c,
+                )
+            } else {
+                (
+                    vec![format!("  je {}", end_label), then_gen].join("\n"),
+                    then_vars,
+                    then_counter,
+                )
+            };
+            (
+                vec![
+                    cond_gen,
+                    "  pop rax".to_string(),
+                    "  cmp rax, 0".to_string(),
+                    els_gen,
+                    format!("{}:", end_label),
+                ]
+                .join("\n"),
+                els_vars,
+                els_counter,
+            )
+        }
+        AST::While { cond, then } => {
+            let begin_label = format!(".Lbegin{}", counter + 1);
+            let end_label = format!(".Lend{}", counter + 2);
+            let next_counter = counter + 3;
+            let (cond_gen, cond_vars, cond_counter) = gen(*cond, vars, next_counter);
+            let (then_gen, then_vars, then_counter) = gen(*then, cond_vars, cond_counter);
+            (
+                vec![
+                    format!("{}:", begin_label),
+                    cond_gen,
+                    "  pop rax".to_string(),
+                    "  cmp rax, 0".to_string(),
+                    format!("  je {}", end_label),
+                    then_gen,
+                    format!("  jmp {}", begin_label),
+                    format!("{}:", end_label),
+                ]
+                .join("\n"),
+                then_vars,
+                then_counter,
+            )
+        }
+        AST::For {
+            init,
+            cond,
+            inc,
+            then,
+        } => {
+            let begin_label = format!(".Lbegin{}", counter + 1);
+            let end_label = format!(".Lend{}", counter + 2);
+            let next_counter = counter + 3;
+            let (init_gen, init_vars, init_counter) = if let Some(ast) = *init {
+                gen(ast, vars, next_counter)
+            } else {
+                ("".to_string(), vars, next_counter)
+            };
+            let (cond_gen, cond_vars, cond_counter) = if let Some(ast) = *cond {
+                let (g, v, c) = gen(ast, init_vars, init_counter);
+                (
+                    vec![
+                        g.as_str(),
+                        "  pop rax",
+                        "  cmp rax, 0",
+                        format!("  je {}", end_label).as_str(),
+                    ]
+                    .join("\n"),
+                    v,
+                    c,
+                )
+            } else {
+                ("".to_string(), init_vars, init_counter)
+            };
+            let (then_gen, then_vars, then_counter) = gen(*then, cond_vars, cond_counter);
+            let (inc_gen, inc_vars, inc_counter) = if let Some(ast) = *inc {
+                gen(ast, then_vars, then_counter)
+            } else {
+                ("".to_string(), then_vars, then_counter)
+            };
+            (
+                vec![
+                    if init_gen.is_empty() {
+                        vec![]
+                    } else {
+                        vec![init_gen]
+                    },
+                    vec![format!("{}:", begin_label)],
+                    if cond_gen.is_empty() {
+                        vec![]
+                    } else {
+                        vec![cond_gen]
+                    },
+                    vec![then_gen],
+                    if inc_gen.is_empty() {
+                        vec![]
+                    } else {
+                        vec![inc_gen]
+                    },
+                    vec![format!("  jmp {}", begin_label), format!("{}:", end_label)],
+                ]
+                .concat()
+                .join("\n"),
+                inc_vars,
+                inc_counter,
             )
         }
         AST::Return { lhs } => {
-            let (lhs_gen, lhs_vars) = gen(*lhs, vars);
+            let (lhs_gen, lhs_vars, lhs_counter) = gen(*lhs, vars, counter);
             (
                 vec![
                     lhs_gen.as_str(),
@@ -158,11 +306,12 @@ fn gen(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String, usiz
                 ]
                 .join("\n"),
                 lhs_vars,
+                lhs_counter,
             )
         }
         AST::Operator { kind, lhs, rhs } => {
-            let (lhs_gen, lhs_vars) = gen(*lhs, vars);
-            let (rhs_gen, rhs_vars) = gen(*rhs, lhs_vars);
+            let (lhs_gen, lhs_vars, lhs_counter) = gen(*lhs, vars, counter);
+            let (rhs_gen, rhs_vars, rhs_counter) = gen(*rhs, lhs_vars, lhs_counter);
             (
                 [
                     vec![lhs_gen.as_str(), rhs_gen.as_str(), "  pop rdi", "  pop rax"],
@@ -179,11 +328,9 @@ fn gen(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String, usiz
                     vec!["  push rax"],
                 ]
                 .concat()
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>()
                 .join("\n"),
                 rhs_vars,
+                rhs_counter,
             )
         }
     }
@@ -206,24 +353,123 @@ fn program<'a>() -> impl Parser<'a, Vec<AST>> {
     many(stmt())
 }
 
-/// stmt       = expr ";"
-///            | "return" expr ";"
-fn stmt<'a>() -> impl Parser<'a, AST> {
-    or(
-        skip(expr(), token(string(";"))),
-        map(
-            skip(
-                then(
-                    token(not_followed_by(string("return"), regex("[a-zA-Z0-9_]", 0))),
-                    expr(),
+/// stmt_expr  = expr ";"
+fn stmt_expr<'a>() -> impl Parser<'a, AST> {
+    skip(expr(), token(string(";")))
+}
+
+/// stmt_if    = "if" "(" expr ")" stmt ("else" stmt)?
+fn stmt_if<'a>() -> impl Parser<'a, AST> {
+    map(
+        and(
+            and(
+                skip(
+                    then(and(token(string("if")), token(string("("))), expr()),
+                    token(string(")")),
                 ),
-                token(string(";")),
+                stmt(),
             ),
-            move |input| AST::Return {
-                lhs: Box::new(input),
-            },
+            at_most(then(token(string("else")), stmt()), 1),
         ),
+        |((cond, then), els)| AST::If {
+            cond: Box::new(cond),
+            then: Box::new(then),
+            els: Box::new(match els.first() {
+                Some(ast) => Some(ast.clone()),
+                None => None,
+            }),
+        },
     )
+}
+
+/// stmt_while = "while" "(" expr ")" stmt
+fn stmt_while<'a>() -> impl Parser<'a, AST> {
+    map(
+        and(
+            skip(
+                then(and(token(string("while")), token(string("("))), expr()),
+                token(string(")")),
+            ),
+            stmt(),
+        ),
+        |(cond, then)| AST::While {
+            cond: Box::new(cond),
+            then: Box::new(then),
+        },
+    )
+}
+
+/// stmt_for = "for" "(" expr? ";" expr? ";" expr? ")" stmt
+fn stmt_for<'a>() -> impl Parser<'a, AST> {
+    map(
+        and(
+            and(
+                and(
+                    skip(
+                        then(
+                            and(token(string("for")), token(string("("))),
+                            at_most(expr(), 1),
+                        ),
+                        token(string(";")),
+                    ),
+                    skip(at_most(expr(), 1), token(string(";"))),
+                ),
+                skip(at_most(expr(), 1), token(string(")"))),
+            ),
+            stmt(),
+        ),
+        |(((init, cond), inc), then)| AST::For {
+            init: Box::new(match init.first() {
+                Some(ast) => Some(ast.clone()),
+                None => None,
+            }),
+            cond: Box::new(match cond.first() {
+                Some(ast) => Some(ast.clone()),
+                None => None,
+            }),
+            inc: Box::new(match inc.first() {
+                Some(ast) => Some(ast.clone()),
+                None => None,
+            }),
+            then: Box::new(then),
+        },
+    )
+}
+
+/// stmt_return = "return" expr ";"
+fn stmt_return<'a>() -> impl Parser<'a, AST> {
+    map(
+        skip(
+            then(
+                token(not_followed_by(string("return"), regex("[a-zA-Z0-9_]", 0))),
+                expr(),
+            ),
+            token(string(";")),
+        ),
+        |input| AST::Return {
+            lhs: Box::new(input),
+        },
+    )
+}
+
+/// stmt       = stmt_expr
+///            | stmt_if
+///            | stmt_while
+///            | stmt_for
+///            | stmt_return
+#[derive(Clone)]
+struct Stmt;
+impl<'a> Parser<'a, AST> for Stmt {
+    fn parse(&self, input: &'a str, position: usize) -> Result<Success<AST>, Failure> {
+        or(
+            or(or(or(stmt_expr(), stmt_if()), stmt_while()), stmt_for()),
+            stmt_return(),
+        )
+        .parse(input, position)
+    }
+}
+fn stmt<'a>() -> impl Parser<'a, AST> {
+    Stmt
 }
 
 /// expr       = assign
@@ -403,6 +649,81 @@ fn ident<'a>() -> impl Parser<'a, AST> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stmt_if_ok() {
+        let parser = stmt_if();
+        let result = parse(parser, "if (first < 3) second = first / 2;");
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            AST::If {
+                cond: Box::new(AST::Operator {
+                    kind: OpKind::Lt,
+                    lhs: Box::new(AST::Variable {
+                        name: "first".to_string()
+                    }),
+                    rhs: Box::new(AST::Literal { value: 3 }),
+                }),
+                then: Box::new(AST::Assign {
+                    lhs: Box::new(AST::Variable {
+                        name: "second".to_string()
+                    }),
+                    rhs: Box::new(AST::Operator {
+                        kind: OpKind::Div,
+                        lhs: Box::new(AST::Variable {
+                            name: "first".to_string()
+                        }),
+                        rhs: Box::new(AST::Literal { value: 2 }),
+                    }),
+                }),
+                els: Box::new(None),
+            }
+        );
+
+        let parser = stmt_if();
+        let result = parse(
+            parser,
+            "if (first < 3) second = first / 2; else second = first * 2;",
+        );
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.value(),
+            AST::If {
+                cond: Box::new(AST::Operator {
+                    kind: OpKind::Lt,
+                    lhs: Box::new(AST::Variable {
+                        name: "first".to_string()
+                    }),
+                    rhs: Box::new(AST::Literal { value: 3 }),
+                }),
+                then: Box::new(AST::Assign {
+                    lhs: Box::new(AST::Variable {
+                        name: "second".to_string()
+                    }),
+                    rhs: Box::new(AST::Operator {
+                        kind: OpKind::Div,
+                        lhs: Box::new(AST::Variable {
+                            name: "first".to_string()
+                        }),
+                        rhs: Box::new(AST::Literal { value: 2 }),
+                    }),
+                }),
+                els: Box::new(Some(AST::Assign {
+                    lhs: Box::new(AST::Variable {
+                        name: "second".to_string()
+                    }),
+                    rhs: Box::new(AST::Operator {
+                        kind: OpKind::Mul,
+                        lhs: Box::new(AST::Variable {
+                            name: "first".to_string()
+                        }),
+                        rhs: Box::new(AST::Literal { value: 2 }),
+                    }),
+                })),
+            }
+        );
+    }
 
     #[test]
     fn expr_ok() {
