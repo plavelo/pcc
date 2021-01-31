@@ -20,16 +20,16 @@ fn main() {
 }
 
 fn generate(asts: Vec<AST>) -> String {
-    let mut vars = HashMap::new();
+    let mut env = Environment {
+        vars: HashMap::new(),
+        counter: 0,
+    };
     let mut acc = vec![];
-    let mut counter = 0;
     for ast in asts {
-        let (gen, next_vars, next_counter) = gen(ast, vars, counter);
-        vars = next_vars;
-        counter = next_counter;
+        let (gen, next_env) = gen(ast, env);
+        env = next_env;
         acc.push(gen);
     }
-    let allocation = vars.values().max().unwrap_or(&0);
     vec![
         ".intel_syntax noprefix",
         ".globl main",
@@ -37,7 +37,7 @@ fn generate(asts: Vec<AST>) -> String {
         // prologue, allocate memory for variables
         "  push rbp",
         "  mov rbp, rsp",
-        format!("  sub rsp, {}", allocation).as_str(),
+        format!("  sub rsp, {}", env.offset()).as_str(),
         acc.join("\n").as_str(),
         // epilogue
         "  mov rsp, rbp",
@@ -106,55 +106,83 @@ enum AST {
     },
 }
 
-fn gen_lvar(tree: AST, vars: HashMap<String, usize>) -> (String, HashMap<String, usize>) {
+#[derive(PartialEq, Debug, Clone)]
+struct Environment {
+    vars: HashMap<String, usize>,
+    counter: usize,
+}
+impl Environment {
+    fn obtain_offset(&self, name: String) -> (usize, Environment) {
+        match self.vars.get(&name) {
+            Some(offset) => (*offset, self.clone()),
+            None => {
+                let next_offset = match self.vars.values().max() {
+                    Some(offset) => offset + 8,
+                    None => 8,
+                };
+                let next_vars = self
+                    .vars
+                    .clone()
+                    .into_iter()
+                    .chain(vec![(name.clone(), next_offset)])
+                    .collect();
+                (
+                    next_offset,
+                    Environment {
+                        vars: next_vars,
+                        counter: self.counter,
+                    },
+                )
+            }
+        }
+    }
+
+    fn obtain_label(&self, prefix: &str) -> (String, Environment) {
+        (
+            format!("{}{}", prefix, self.counter),
+            Environment {
+                vars: self.vars.clone(),
+                counter: self.counter + 1,
+            },
+        )
+    }
+
+    fn offset(&self) -> usize {
+        *self.vars.values().max().unwrap_or(&0)
+    }
+}
+
+fn gen_lvar(tree: AST, env: Environment) -> (String, Environment) {
     match tree {
         AST::Variable { name } => {
-            let (next_offset, next_vars) = match vars.get(&name) {
-                Some(offset) => (*offset, vars),
-                None => {
-                    let next_offset = match vars.values().max() {
-                        Some(offset) => offset + 8,
-                        None => 8,
-                    };
-                    let next_vars = vars
-                        .into_iter()
-                        .chain(vec![(name.clone(), next_offset)])
-                        .collect();
-                    (next_offset, next_vars)
-                }
-            };
+            let (offset, next_env) = env.obtain_offset(name);
             (
                 vec![
                     "  mov rax, rbp",
-                    format!("  sub rax, {}", next_offset).as_str(),
+                    format!("  sub rax, {}", offset).as_str(),
                     "  push rax",
                 ]
                 .join("\n"),
-                next_vars,
+                next_env,
             )
         }
         _ => panic!("The left side value of the assignment is not a variable."),
     }
 }
 
-fn gen(
-    tree: AST,
-    vars: HashMap<String, usize>,
-    counter: usize,
-) -> (String, HashMap<String, usize>, usize) {
+fn gen(tree: AST, env: Environment) -> (String, Environment) {
     match tree {
-        AST::Literal { value } => (format!("  push {}", value), vars, counter),
+        AST::Literal { value } => (format!("  push {}", value), env),
         AST::Variable { name: _ } => {
-            let (gen, next_vars) = gen_lvar(tree, vars);
+            let (gen, env) = gen_lvar(tree, env);
             (
                 vec![gen.as_str(), "  pop rax", "  mov rax, [rax]", "  push rax"].join("\n"),
-                next_vars,
-                counter,
+                env,
             )
         }
         AST::Assign { lhs, rhs } => {
-            let (lhs_gen, lhs_vars) = gen_lvar(*lhs, vars);
-            let (rhs_gen, rhs_vars, rhs_counter) = gen(*rhs, lhs_vars, counter);
+            let (lhs_gen, env) = gen_lvar(*lhs, env);
+            let (rhs_gen, env) = gen(*rhs, env);
             (
                 vec![
                     lhs_gen.as_str(),
@@ -165,70 +193,64 @@ fn gen(
                     "  push rdi",
                 ]
                 .join("\n"),
-                rhs_vars,
-                rhs_counter,
+                env,
             )
         }
         AST::If { cond, then, els } => {
-            let els_label = format!(".Lelse{}", counter);
-            let end_label = format!(".Lend{}", counter + 1);
-            let next_counter = counter + 2;
-            let (cond_gen, cond_vars, cond_counter) = gen(*cond, vars, next_counter);
-            let (then_gen, then_vars, then_counter) = gen(*then, cond_vars, cond_counter);
-            let (els_gen, els_vars, els_counter) = if let Some(ast) = *els {
-                let (g, v, c) = gen(ast, then_vars, then_counter);
+            let (els_label, env) = env.obtain_label(".Lelse");
+            let (end_label, env) = env.obtain_label(".Lend");
+            let (cond_gen, env) = gen(*cond, env);
+            let (then_gen, env) = gen(*then, env);
+            if let Some(ast) = *els {
+                let (els_gen, env) = gen(ast, env);
                 (
                     vec![
+                        cond_gen,
+                        "  pop rax".to_string(),
+                        "  cmp rax, 0".to_string(),
                         format!("  je {}", els_label),
                         then_gen,
                         format!("  jmp {}", end_label),
                         format!("{}:", els_label),
-                        g,
+                        els_gen,
+                        format!("{}:", end_label),
                     ]
                     .join("\n"),
-                    v,
-                    c,
+                    env,
                 )
             } else {
                 (
-                    vec![format!("  je {}", end_label), then_gen].join("\n"),
-                    then_vars,
-                    then_counter,
+                    vec![
+                        cond_gen,
+                        "  pop rax".to_string(),
+                        "  cmp rax, 0".to_string(),
+                        format!("  je {}", end_label),
+                        then_gen,
+                        format!("{}:", end_label),
+                    ]
+                    .join("\n"),
+                    env,
                 )
-            };
-            (
-                vec![
-                    cond_gen,
-                    "  pop rax".to_string(),
-                    "  cmp rax, 0".to_string(),
-                    els_gen,
-                    format!("{}:", end_label),
-                ]
-                .join("\n"),
-                els_vars,
-                els_counter,
-            )
+            }
         }
         AST::While { cond, then } => {
-            let begin_label = format!(".Lbegin{}", counter + 1);
-            let end_label = format!(".Lend{}", counter + 2);
-            let next_counter = counter + 3;
-            let (cond_gen, cond_vars, cond_counter) = gen(*cond, vars, next_counter);
-            let (then_gen, then_vars, then_counter) = gen(*then, cond_vars, cond_counter);
+            let (bgn_label, env) = env.obtain_label(".Lbgn");
+            let (end_label, env) = env.obtain_label(".Lend");
+            let (cond_gen, env) = gen(*cond, env);
+            let (then_gen, env) = gen(*then, env);
             (
                 vec![
-                    format!("{}:", begin_label),
+                    format!("{}:", bgn_label),
                     cond_gen,
                     "  pop rax".to_string(),
                     "  cmp rax, 0".to_string(),
                     format!("  je {}", end_label),
                     then_gen,
-                    format!("  jmp {}", begin_label),
+                    format!("  jmp {}", bgn_label),
                     format!("{}:", end_label),
                 ]
                 .join("\n"),
-                then_vars,
-                then_counter,
+                env,
             )
         }
         AST::For {
@@ -237,65 +259,55 @@ fn gen(
             inc,
             then,
         } => {
-            let begin_label = format!(".Lbegin{}", counter + 1);
-            let end_label = format!(".Lend{}", counter + 2);
-            let next_counter = counter + 3;
-            let (init_gen, init_vars, init_counter) = if let Some(ast) = *init {
-                gen(ast, vars, next_counter)
+            let (bgn_label, env) = env.obtain_label(".Lbgn");
+            let (end_label, env) = env.obtain_label(".Lend");
+            let (init_gen, env) = if let Some(ast) = *init {
+                let (gen, _env) = gen(ast, env);
+                (vec![gen], _env)
             } else {
-                ("".to_string(), vars, next_counter)
+                (vec![], env)
             };
-            let (cond_gen, cond_vars, cond_counter) = if let Some(ast) = *cond {
-                let (g, v, c) = gen(ast, init_vars, init_counter);
+            let (cond_gen, env) = if let Some(ast) = *cond {
+                let (gen, _env) = gen(ast, env);
                 (
-                    vec![
-                        g.as_str(),
+                    vec![vec![
+                        gen.as_str(),
                         "  pop rax",
                         "  cmp rax, 0",
                         format!("  je {}", end_label).as_str(),
                     ]
-                    .join("\n"),
-                    v,
-                    c,
+                    .join("\n")],
+                    _env,
                 )
             } else {
-                ("".to_string(), init_vars, init_counter)
+                (vec![], env)
             };
-            let (then_gen, then_vars, then_counter) = gen(*then, cond_vars, cond_counter);
-            let (inc_gen, inc_vars, inc_counter) = if let Some(ast) = *inc {
-                gen(ast, then_vars, then_counter)
+            let (then_gen, env) = {
+                let (gen, _env) = gen(*then, env);
+                (vec![gen], _env)
+            };
+            let (inc_gen, env) = if let Some(ast) = *inc {
+                let (gen, _env) = gen(ast, env);
+                (vec![gen], _env)
             } else {
-                ("".to_string(), then_vars, then_counter)
+                (vec![], env)
             };
             (
                 vec![
-                    if init_gen.is_empty() {
-                        vec![]
-                    } else {
-                        vec![init_gen]
-                    },
-                    vec![format!("{}:", begin_label)],
-                    if cond_gen.is_empty() {
-                        vec![]
-                    } else {
-                        vec![cond_gen]
-                    },
-                    vec![then_gen],
-                    if inc_gen.is_empty() {
-                        vec![]
-                    } else {
-                        vec![inc_gen]
-                    },
-                    vec![format!("  jmp {}", begin_label), format!("{}:", end_label)],
+                    init_gen,
+                    vec![format!("{}:", bgn_label)],
+                    cond_gen,
+                    then_gen,
+                    inc_gen,
+                    vec![format!("  jmp {}", bgn_label), format!("{}:", end_label)],
                 ]
                 .concat()
                 .join("\n"),
-                inc_vars,
-                inc_counter,
+                env,
             )
         }
         AST::Return { lhs } => {
-            let (lhs_gen, lhs_vars, lhs_counter) = gen(*lhs, vars, counter);
+            let (lhs_gen, env) = gen(*lhs, env);
             (
                 vec![
                     lhs_gen.as_str(),
@@ -305,13 +317,12 @@ fn gen(
                     "  ret",
                 ]
                 .join("\n"),
-                lhs_vars,
-                lhs_counter,
+                env,
             )
         }
         AST::Operator { kind, lhs, rhs } => {
-            let (lhs_gen, lhs_vars, lhs_counter) = gen(*lhs, vars, counter);
-            let (rhs_gen, rhs_vars, rhs_counter) = gen(*rhs, lhs_vars, lhs_counter);
+            let (lhs_gen, env) = gen(*lhs, env);
+            let (rhs_gen, env) = gen(*rhs, env);
             (
                 [
                     vec![lhs_gen.as_str(), rhs_gen.as_str(), "  pop rdi", "  pop rax"],
@@ -329,8 +340,7 @@ fn gen(
                 ]
                 .concat()
                 .join("\n"),
-                rhs_vars,
-                rhs_counter,
+                env,
             )
         }
     }
