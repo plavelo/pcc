@@ -22,9 +22,41 @@ fn program<'a>() -> impl Parser<'a, Vec<AST>> {
     many(stmt())
 }
 
+/// stmt       = stmt_expr
+///            | stmt_block
+///            | stmt_if
+///            | stmt_while
+///            | stmt_for
+///            | stmt_return
+#[derive(Clone)]
+struct Stmt;
+impl<'a> Parser<'a, AST> for Stmt {
+    fn parse(&self, input: &'a str, position: usize) -> Result<Success<AST>, Failure> {
+        or(
+            or(
+                or(or(or(stmt_expr(), stmt_block()), stmt_if()), stmt_while()),
+                stmt_for(),
+            ),
+            stmt_return(),
+        )
+        .parse(input, position)
+    }
+}
+fn stmt<'a>() -> impl Parser<'a, AST> {
+    Stmt
+}
+
 /// stmt_expr  = expr ";"
 fn stmt_expr<'a>() -> impl Parser<'a, AST> {
     skip(expr(), token(string(";")))
+}
+
+/// stmt_block = "{" stmt* "}"
+fn stmt_block<'a>() -> impl Parser<'a, AST> {
+    map(
+        skip(then(token(string("{")), many(stmt())), token(string("}"))),
+        |input| AST::Block { stmts: input },
+    )
 }
 
 /// stmt_if    = "if" "(" expr ")" stmt ("else" stmt)?
@@ -121,26 +153,6 @@ fn stmt_return<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// stmt       = stmt_expr
-///            | stmt_if
-///            | stmt_while
-///            | stmt_for
-///            | stmt_return
-#[derive(Clone)]
-struct Stmt;
-impl<'a> Parser<'a, AST> for Stmt {
-    fn parse(&self, input: &'a str, position: usize) -> Result<Success<AST>, Failure> {
-        or(
-            or(or(or(stmt_expr(), stmt_if()), stmt_while()), stmt_for()),
-            stmt_return(),
-        )
-        .parse(input, position)
-    }
-}
-fn stmt<'a>() -> impl Parser<'a, AST> {
-    Stmt
-}
-
 /// expr       = assign
 fn expr<'a>() -> impl Parser<'a, AST> {
     assign()
@@ -182,11 +194,12 @@ fn equality<'a>() -> impl Parser<'a, AST> {
             )),
         ),
         |(init, rest)| {
-            rest.iter().fold(init, |node, (kind, next)| AST::Operator {
-                kind: if kind == "==" { OpKind::Eq } else { OpKind::Ne },
-                lhs: Box::new(node),
-                rhs: Box::new(next.clone()),
-            })
+            rest.into_iter()
+                .fold(init, |node, (kind, next)| AST::Operator {
+                    kind: if kind == "==" { OpKind::Eq } else { OpKind::Ne },
+                    lhs: Box::new(node),
+                    rhs: Box::new(next),
+                })
         },
     )
 }
@@ -208,16 +221,16 @@ fn relational<'a>() -> impl Parser<'a, AST> {
             )),
         ),
         |(init, rest)| {
-            rest.iter()
+            rest.into_iter()
                 .fold(init, |node, (kind, next)| match kind.as_str() {
                     l @ "<" | l @ "<=" => AST::Operator {
                         kind: if l == "<" { OpKind::Lt } else { OpKind::Le },
                         lhs: Box::new(node),
-                        rhs: Box::new(next.clone()),
+                        rhs: Box::new(next),
                     },
                     g => AST::Operator {
                         kind: if g == ">" { OpKind::Lt } else { OpKind::Le },
-                        lhs: Box::new(next.clone()),
+                        lhs: Box::new(next),
                         rhs: Box::new(node),
                     },
                 })
@@ -236,15 +249,16 @@ fn add<'a>() -> impl Parser<'a, AST> {
             )),
         ),
         |(init, rest)| {
-            rest.iter().fold(init, |node, (kind, next)| AST::Operator {
-                kind: if kind == "+" {
-                    OpKind::Add
-                } else {
-                    OpKind::Sub
-                },
-                lhs: Box::new(node),
-                rhs: Box::new(next.clone()),
-            })
+            rest.into_iter()
+                .fold(init, |node, (kind, next)| AST::Operator {
+                    kind: if kind == "+" {
+                        OpKind::Add
+                    } else {
+                        OpKind::Sub
+                    },
+                    lhs: Box::new(node),
+                    rhs: Box::new(next),
+                })
         },
     )
 }
@@ -260,15 +274,16 @@ fn mul<'a>() -> impl Parser<'a, AST> {
             )),
         ),
         |(init, rest)| {
-            rest.iter().fold(init, |node, (kind, next)| AST::Operator {
-                kind: if kind == "*" {
-                    OpKind::Mul
-                } else {
-                    OpKind::Div
-                },
-                lhs: Box::new(node),
-                rhs: Box::new(next.clone()),
-            })
+            rest.into_iter()
+                .fold(init, |node, (kind, next)| AST::Operator {
+                    kind: if kind == "*" {
+                        OpKind::Mul
+                    } else {
+                        OpKind::Div
+                    },
+                    lhs: Box::new(node),
+                    rhs: Box::new(next),
+                })
         },
     )
 }

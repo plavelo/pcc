@@ -45,4 +45,7 @@ pub enum AST {
     Return {
         lhs: Box<AST>,
     },
+    Block {
+        stmts: Vec<AST>,
+    },
 }

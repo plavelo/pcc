@@ -1,13 +1,38 @@
 use crate::ast::*;
 use std::collections::HashMap;
 
+pub fn generate(asts: Vec<AST>) -> String {
+    let mut env = Environment::default();
+    let mut acc = vec![];
+    for ast in asts {
+        let (gen, next_env) = gen(ast, env);
+        env = next_env;
+        acc.push(gen);
+    }
+    vec![
+        ".intel_syntax noprefix",
+        ".globl main",
+        "main:",
+        // prologue, allocate memory for variables
+        "  push rbp",
+        "  mov rbp, rsp",
+        format!("  sub rsp, {}", env.offset()).as_str(),
+        acc.join("\n").as_str(),
+        // epilogue
+        "  mov rsp, rbp",
+        "  pop rbp",
+        "  ret",
+    ]
+    .join("\n")
+}
+
 #[derive(PartialEq, Debug, Clone, Default)]
-pub struct Environment {
+struct Environment {
     vars: HashMap<String, usize>,
     counter: usize,
 }
 impl Environment {
-    pub fn offset(&self) -> usize {
+    fn offset(&self) -> usize {
         *self.vars.values().max().unwrap_or(&0)
     }
 
@@ -47,7 +72,7 @@ impl Environment {
     }
 }
 
-pub fn gen_lvar(tree: AST, env: Environment) -> (String, Environment) {
+fn gen_lvar(tree: AST, env: Environment) -> (String, Environment) {
     match tree {
         AST::Variable { name } => {
             let (offset, next_env) = env.obtain_offset(name);
@@ -65,7 +90,7 @@ pub fn gen_lvar(tree: AST, env: Environment) -> (String, Environment) {
     }
 }
 
-pub fn gen(tree: AST, env: Environment) -> (String, Environment) {
+fn gen(tree: AST, env: Environment) -> (String, Environment) {
     match tree {
         AST::Literal { value } => (format!("  push {}", value), env),
         AST::Variable { name: _ } => {
@@ -214,6 +239,16 @@ pub fn gen(tree: AST, env: Environment) -> (String, Environment) {
                 .join("\n"),
                 env,
             )
+        }
+        AST::Block { stmts } => {
+            let mut next_env = env;
+            let mut acc = vec![];
+            for stmt in stmts.into_iter() {
+                let (gen, _env) = gen(stmt, next_env);
+                next_env = _env;
+                acc.push(gen);
+            }
+            (acc.join("\n"), next_env)
         }
         AST::Operator { kind, lhs, rhs } => {
             let (lhs_gen, env) = gen(*lhs, env);
