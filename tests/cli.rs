@@ -225,3 +225,21 @@ fn for_ok() {
         9,
     );
 }
+
+#[test]
+fn block_ok() {
+    assert_eq!(
+        status(
+            r#"
+            {
+                second = 0;
+                for (first = 0; first < 10; first = first + 1)
+                    second = first;
+                return second;
+            }
+            "#
+        )
+        .unwrap(),
+        9,
+    );
+}
