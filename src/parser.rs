@@ -325,9 +325,21 @@ fn num<'a>() -> impl Parser<'a, AST> {
 }
 
 fn ident<'a>() -> impl Parser<'a, AST> {
-    map(token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)), |input| {
-        AST::Variable { name: input }
-    })
+    or(
+        map(
+            skip(
+                skip(
+                    token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)),
+                    token(string("(")),
+                ),
+                token(string(")")),
+            ),
+            |input| AST::Function { name: input },
+        ),
+        map(token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)), |input| {
+            AST::Variable { name: input }
+        }),
+    )
 }
 
 #[cfg(test)]

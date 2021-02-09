@@ -337,6 +337,7 @@ fn gen(tree: AST, env: Environment) -> (String, Environment) {
             acc.push("# <<<<< block".to_string());
             (acc.join("\n"), next_env)
         }
+        AST::Function { name } => (format!("  call {}", name), env),
         AST::Operator { kind, lhs, rhs } => {
             let (lhs_gen, env) = gen(*lhs, env);
             let (rhs_gen, env) = gen(*rhs, env);
