@@ -22,22 +22,22 @@ fn program<'a>() -> impl Parser<'a, Vec<AST>> {
     many(stmt())
 }
 
-/// stmt       = stmt_expr
-///            | stmt_block
+/// stmt       = stmt_block
 ///            | stmt_if
 ///            | stmt_while
 ///            | stmt_for
 ///            | stmt_return
+///            | stmt_expr
 #[derive(Clone)]
 struct Stmt;
 impl<'a> Parser<'a, AST> for Stmt {
     fn parse(&self, input: &'a str, position: usize) -> Result<Success<AST>, Failure> {
         or(
             or(
-                or(or(or(stmt_expr(), stmt_block()), stmt_if()), stmt_while()),
-                stmt_for(),
+                or(or(or(stmt_block(), stmt_if()), stmt_while()), stmt_for()),
+                stmt_return(),
             ),
-            stmt_return(),
+            stmt_expr(),
         )
         .parse(input, position)
     }
@@ -324,19 +324,22 @@ fn num<'a>() -> impl Parser<'a, AST> {
     })
 }
 
-/// ident   = 1*(ALPHA / DIGIT / "_")
-///         | 1*(ALPHA / DIGIT / "_") "(" ")"
+/// ident   = 1*(ALPHA / DIGIT / "_") "(" (expr 0*("," expr))? ")"
+///         | 1*(ALPHA / DIGIT / "_")
 fn ident<'a>() -> impl Parser<'a, AST> {
     or(
         map(
             skip(
-                skip(
-                    token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)),
-                    token(string("(")),
+                and(
+                    skip(
+                        token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)),
+                        token(string("(")),
+                    ),
+                    sep_by(expr(), token(string(","))),
                 ),
                 token(string(")")),
             ),
-            |input| AST::Function { name: input },
+            |(name, args)| AST::Call { name, args },
         ),
         map(token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)), |input| {
             AST::Variable { name: input }

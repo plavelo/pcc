@@ -32,7 +32,8 @@ fn status(input: &str) -> Result<i32, Error> {
         .output()
         .unwrap();
     if !result.status.success() {
-        println!("{}", String::from_utf8(result.stderr).unwrap());
+        println!("ERROR: {}", input);
+        println!("ERROR: {}", String::from_utf8(result.stderr).unwrap());
     }
 
     // Execute

@@ -337,7 +337,23 @@ fn gen(tree: AST, env: Environment) -> (String, Environment) {
             acc.push("# <<<<< block".to_string());
             (acc.join("\n"), next_env)
         }
-        AST::Function { name } => (format!("  call {}", name), env),
+        AST::Call { name, args } => {
+            let mut next_env = env;
+            let mut acc = vec!["# calling >>>>>".to_string()];
+            for arg in args {
+                let (gen, _env) = gen(arg, next_env);
+                next_env = _env;
+                acc.push(gen);
+            }
+            // bsp must be divisible by 16.
+            let adjustment = 16 - next_env.offset() % 16;
+            if adjustment > 0 {
+                acc.push(format!("  sub rsp, {}", adjustment));
+            }
+            acc.push(format!("  call {}", name));
+            acc.push("# <<<<< calling".to_string());
+            (acc.join("\n"), next_env)
+        }
         AST::Operator { kind, lhs, rhs } => {
             let (lhs_gen, env) = gen(*lhs, env);
             let (rhs_gen, env) = gen(*rhs, env);

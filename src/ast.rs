@@ -48,7 +48,8 @@ pub enum AST {
     Block {
         stmts: Vec<AST>,
     },
-    Function {
+    Call {
         name: String,
+        args: Vec<AST>,
     },
 }
