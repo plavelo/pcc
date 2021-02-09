@@ -12,20 +12,7 @@ pub fn generate(asts: Vec<AST>) -> String {
     vec![
         ".intel_syntax noprefix",
         ".globl main",
-        "main:",
-        // prologue, allocate memory for variables
-        "# prologue",
-        "  push rbp",
-        "  mov rbp, rsp",
-        "# allocate >>>>>",
-        format!("  sub rsp, {}", env.offset()).as_str(),
-        "# <<<<< allocate",
         acc.join("\n").as_str(),
-        // epilogue
-        "# epilogue",
-        "  mov rsp, rbp",
-        "  pop rbp",
-        "  ret",
     ]
     .join("\n")
 }
@@ -96,6 +83,51 @@ fn gen_lvar(tree: AST, env: Environment) -> (String, Environment) {
 
 fn gen(tree: AST, env: Environment) -> (String, Environment) {
     match tree {
+        AST::Function { name, args, body } => {
+            let mut local_env = Environment::default();
+            let mut acc = vec![];
+            let arg_with_reg = args
+                .into_iter()
+                .zip(["rdi", "rsi", "rdx", "rcx", "r8", "r9"].iter());
+            for (arg, reg) in arg_with_reg {
+                let (gen, _env) = gen_lvar(arg, local_env);
+                local_env = _env;
+                acc.push(
+                    vec![
+                        "# assign argument >>>>>",
+                        "# variable >>>>>",
+                        gen.as_str(),
+                        "# <<<<< variable",
+                        "  pop rax",
+                        format!("  mov [rax], {}", reg).as_str(),
+                        "# <<<<< assign",
+                    ]
+                    .join("\n"),
+                );
+            }
+            let (gen, local_env) = gen(*body, local_env);
+            (
+                vec![
+                    vec![
+                        "# function >>>>>".to_string(),
+                        format!("{}:", name),
+                        // prologue, allocate memory for variables
+                        "# prologue >>>>>".to_string(),
+                        "  push rbp".to_string(),
+                        "  mov rbp, rsp".to_string(),
+                        "# <<<<< prologue".to_string(),
+                        "# allocate >>>>>".to_string(),
+                        format!("  sub rsp, {}", local_env.offset()),
+                        "# <<<<< allocate".to_string(),
+                    ],
+                    acc,
+                    vec![gen, "# <<<<< function".to_string()],
+                ]
+                .concat()
+                .join("\n"),
+                env,
+            )
+        }
         AST::Literal { value } => (
             vec![
                 "# literal >>>>>",
@@ -340,17 +372,22 @@ fn gen(tree: AST, env: Environment) -> (String, Environment) {
         AST::Call { name, args } => {
             let mut next_env = env;
             let mut acc = vec!["# calling >>>>>".to_string()];
-            for arg in args {
+            let arg_with_reg = args
+                .into_iter()
+                .zip(["rdi", "rsi", "rdx", "rcx", "r8", "r9"].iter());
+            for (arg, reg) in arg_with_reg {
                 let (gen, _env) = gen(arg, next_env);
                 next_env = _env;
                 acc.push(gen);
+                acc.push(format!("  pop {}", reg));
             }
             // bsp must be divisible by 16.
-            let adjustment = 16 - next_env.offset() % 16;
+            let adjustment = next_env.offset() % 16;
             if adjustment > 0 {
-                acc.push(format!("  sub rsp, {}", adjustment));
+                acc.push(format!("  sub rsp, {}", 16 - adjustment));
             }
             acc.push(format!("  call {}", name));
+            acc.push("  push rax".to_string());
             acc.push("# <<<<< calling".to_string());
             (acc.join("\n"), next_env)
         }

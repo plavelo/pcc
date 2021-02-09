@@ -17,9 +17,33 @@ where
     skip(parser, whitespace())
 }
 
-/// program    = stmt*
+/// program    = function_definition*
 fn program<'a>() -> impl Parser<'a, Vec<AST>> {
-    many(stmt())
+    many(function_definition())
+}
+
+/// function_definition   = ident "(" (ident 0*("," ident))? ")" stmt_block
+fn function_definition<'a>() -> impl Parser<'a, AST> {
+    map(
+        and(
+            skip(
+                and(
+                    skip(
+                        token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)),
+                        token(string("(")),
+                    ),
+                    sep_by(ident(), token(string(","))),
+                ),
+                token(string(")")),
+            ),
+            stmt_block(),
+        ),
+        |((name, args), body)| AST::Function {
+            name,
+            args,
+            body: Box::new(body),
+        },
+    )
 }
 
 /// stmt       = stmt_block
@@ -310,11 +334,28 @@ fn unary<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// primary = num | ident | "(" expr ")"
+/// primary = num | function_call | ident | "(" expr ")"
 fn primary<'a>() -> impl Parser<'a, AST> {
     or(
-        or(num(), ident()),
+        or(or(num(), function_call()), ident()),
         then(token(string("(")), skip(expr(), token(string(")")))),
+    )
+}
+
+/// function_call = ident "(" (expr 0*("," expr))? ")"
+fn function_call<'a>() -> impl Parser<'a, AST> {
+    map(
+        skip(
+            and(
+                skip(
+                    token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)),
+                    token(string("(")),
+                ),
+                sep_by(expr(), token(string(","))),
+            ),
+            token(string(")")),
+        ),
+        |(name, args)| AST::Call { name, args },
     )
 }
 
@@ -324,27 +365,11 @@ fn num<'a>() -> impl Parser<'a, AST> {
     })
 }
 
-/// ident   = 1*(ALPHA / DIGIT / "_") "(" (expr 0*("," expr))? ")"
-///         | 1*(ALPHA / DIGIT / "_")
+/// ident   = 1*(ALPHA / DIGIT / "_")
 fn ident<'a>() -> impl Parser<'a, AST> {
-    or(
-        map(
-            skip(
-                and(
-                    skip(
-                        token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)),
-                        token(string("(")),
-                    ),
-                    sep_by(expr(), token(string(","))),
-                ),
-                token(string(")")),
-            ),
-            |(name, args)| AST::Call { name, args },
-        ),
-        map(token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)), |input| {
-            AST::Variable { name: input }
-        }),
-    )
+    map(token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)), |input| {
+        AST::Variable { name: input }
+    })
 }
 
 #[cfg(test)]

@@ -12,6 +12,11 @@ pub enum OpKind {
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum AST {
+    Function {
+        name: String,
+        args: Vec<AST>,
+        body: Box<AST>,
+    },
     Operator {
         kind: OpKind,
         lhs: Box<AST>,
