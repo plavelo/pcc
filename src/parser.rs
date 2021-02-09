@@ -324,6 +324,8 @@ fn num<'a>() -> impl Parser<'a, AST> {
     })
 }
 
+/// ident   = 1*(ALPHA / DIGIT / "_")
+///         | 1*(ALPHA / DIGIT / "_") "(" ")"
 fn ident<'a>() -> impl Parser<'a, AST> {
     or(
         map(
