@@ -17,27 +17,48 @@ where
     skip(parser, whitespace())
 }
 
-/// program    = stmt*
+/// program = func_def*
 fn program<'a>() -> impl Parser<'a, Vec<AST>> {
-    many(stmt())
+    many(func_def())
 }
 
-/// stmt       = stmt_expr
-///            | stmt_block
+/// func_def = ident "(" (var 0*("," var))? ")" stmt_block
+fn func_def<'a>() -> impl Parser<'a, AST> {
+    map(
+        and(
+            skip(
+                and(
+                    skip(ident(), token(string("("))),
+                    sep_by(var(), token(string(","))),
+                ),
+                token(string(")")),
+            ),
+            stmt_block(),
+        ),
+        |((name, args), body)| AST::Function {
+            name,
+            args,
+            body: Box::new(body),
+        },
+    )
+}
+
+/// stmt       = stmt_block
 ///            | stmt_if
 ///            | stmt_while
 ///            | stmt_for
 ///            | stmt_return
+///            | stmt_expr
 #[derive(Clone)]
 struct Stmt;
 impl<'a> Parser<'a, AST> for Stmt {
     fn parse(&self, input: &'a str, position: usize) -> Result<Success<AST>, Failure> {
         or(
             or(
-                or(or(or(stmt_expr(), stmt_block()), stmt_if()), stmt_while()),
-                stmt_for(),
+                or(or(or(stmt_block(), stmt_if()), stmt_while()), stmt_for()),
+                stmt_return(),
             ),
-            stmt_return(),
+            stmt_expr(),
         )
         .parse(input, position)
     }
@@ -310,24 +331,43 @@ fn unary<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// primary = num | ident | "(" expr ")"
+/// primary = num | func_call | var | "(" expr ")"
 fn primary<'a>() -> impl Parser<'a, AST> {
     or(
-        or(num(), ident()),
+        or(or(num(), func_call()), var()),
         then(token(string("(")), skip(expr(), token(string(")")))),
     )
 }
 
+/// func_call = ident "(" (expr 0*("," expr))? ")"
+fn func_call<'a>() -> impl Parser<'a, AST> {
+    map(
+        skip(
+            and(
+                skip(ident(), token(string("("))),
+                sep_by(expr(), token(string(","))),
+            ),
+            token(string(")")),
+        ),
+        |(name, args)| AST::Call { name, args },
+    )
+}
+
+/// var = ident
+fn var<'a>() -> impl Parser<'a, AST> {
+    map(ident(), |input| AST::Variable { name: input })
+}
+
+/// num = <unsigned number>
 fn num<'a>() -> impl Parser<'a, AST> {
     map(token(regex("(0|[1-9][0-9]*)", 0)), |input| AST::Literal {
         value: input.parse::<usize>().unwrap(),
     })
 }
 
-fn ident<'a>() -> impl Parser<'a, AST> {
-    map(token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)), |input| {
-        AST::Variable { name: input }
-    })
+/// ident = 1*(ALPHA / DIGIT / "_")
+fn ident<'a>() -> impl Parser<'a, String> {
+    token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0))
 }
 
 #[cfg(test)]

@@ -260,8 +260,7 @@ pub fn regex<'a>(pattern: &'a str, group: usize) -> impl Parser<'a, String> {
     }
 }
 
-#[allow(dead_code)]
-fn sep_by<'a, P, S, OutputP, OutputS>(parser: P, separator: S) -> impl Parser<'a, Vec<OutputP>>
+pub fn sep_by<'a, P, S, OutputP, OutputS>(parser: P, separator: S) -> impl Parser<'a, Vec<OutputP>>
 where
     P: Parser<'a, OutputP>,
     S: Parser<'a, OutputS>,
