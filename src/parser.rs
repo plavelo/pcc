@@ -22,17 +22,14 @@ fn program<'a>() -> impl Parser<'a, Vec<AST>> {
     many(function_definition())
 }
 
-/// function_definition   = ident "(" (ident 0*("," ident))? ")" stmt_block
+/// function_definition   = ident "(" (variable 0*("," variable))? ")" stmt_block
 fn function_definition<'a>() -> impl Parser<'a, AST> {
     map(
         and(
             skip(
                 and(
-                    skip(
-                        token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)),
-                        token(string("(")),
-                    ),
-                    sep_by(ident(), token(string(","))),
+                    skip(ident(), token(string("("))),
+                    sep_by(variable(), token(string(","))),
                 ),
                 token(string(")")),
             ),
@@ -334,10 +331,10 @@ fn unary<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// primary = num | function_call | ident | "(" expr ")"
+/// primary = num | function_call | variable | "(" expr ")"
 fn primary<'a>() -> impl Parser<'a, AST> {
     or(
-        or(or(num(), function_call()), ident()),
+        or(or(num(), function_call()), variable()),
         then(token(string("(")), skip(expr(), token(string(")")))),
     )
 }
@@ -347,10 +344,7 @@ fn function_call<'a>() -> impl Parser<'a, AST> {
     map(
         skip(
             and(
-                skip(
-                    token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)),
-                    token(string("(")),
-                ),
+                skip(ident(), token(string("("))),
                 sep_by(expr(), token(string(","))),
             ),
             token(string(")")),
@@ -359,6 +353,12 @@ fn function_call<'a>() -> impl Parser<'a, AST> {
     )
 }
 
+/// variable = ident
+fn variable<'a>() -> impl Parser<'a, AST> {
+    map(ident(), |input| AST::Variable { name: input })
+}
+
+/// num     = <unsigned number>
 fn num<'a>() -> impl Parser<'a, AST> {
     map(token(regex("(0|[1-9][0-9]*)", 0)), |input| AST::Literal {
         value: input.parse::<usize>().unwrap(),
@@ -366,10 +366,8 @@ fn num<'a>() -> impl Parser<'a, AST> {
 }
 
 /// ident   = 1*(ALPHA / DIGIT / "_")
-fn ident<'a>() -> impl Parser<'a, AST> {
-    map(token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0)), |input| {
-        AST::Variable { name: input }
-    })
+fn ident<'a>() -> impl Parser<'a, String> {
+    token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0))
 }
 
 #[cfg(test)]

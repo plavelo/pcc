@@ -341,7 +341,7 @@ fn function_ok() {
             }
 
             main() {
-                return calc(1);
+                return calc(10);
             }
             "#
         )
