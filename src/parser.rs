@@ -17,19 +17,19 @@ where
     skip(parser, whitespace())
 }
 
-/// program    = function_definition*
+/// program = func_def*
 fn program<'a>() -> impl Parser<'a, Vec<AST>> {
-    many(function_definition())
+    many(func_def())
 }
 
-/// function_definition   = ident "(" (variable 0*("," variable))? ")" stmt_block
-fn function_definition<'a>() -> impl Parser<'a, AST> {
+/// func_def = ident "(" (var 0*("," var))? ")" stmt_block
+fn func_def<'a>() -> impl Parser<'a, AST> {
     map(
         and(
             skip(
                 and(
                     skip(ident(), token(string("("))),
-                    sep_by(variable(), token(string(","))),
+                    sep_by(var(), token(string(","))),
                 ),
                 token(string(")")),
             ),
@@ -331,16 +331,16 @@ fn unary<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// primary = num | function_call | variable | "(" expr ")"
+/// primary = num | func_call | var | "(" expr ")"
 fn primary<'a>() -> impl Parser<'a, AST> {
     or(
-        or(or(num(), function_call()), variable()),
+        or(or(num(), func_call()), var()),
         then(token(string("(")), skip(expr(), token(string(")")))),
     )
 }
 
-/// function_call = ident "(" (expr 0*("," expr))? ")"
-fn function_call<'a>() -> impl Parser<'a, AST> {
+/// func_call = ident "(" (expr 0*("," expr))? ")"
+fn func_call<'a>() -> impl Parser<'a, AST> {
     map(
         skip(
             and(
@@ -353,19 +353,19 @@ fn function_call<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// variable = ident
-fn variable<'a>() -> impl Parser<'a, AST> {
+/// var = ident
+fn var<'a>() -> impl Parser<'a, AST> {
     map(ident(), |input| AST::Variable { name: input })
 }
 
-/// num     = <unsigned number>
+/// num = <unsigned number>
 fn num<'a>() -> impl Parser<'a, AST> {
     map(token(regex("(0|[1-9][0-9]*)", 0)), |input| AST::Literal {
         value: input.parse::<usize>().unwrap(),
     })
 }
 
-/// ident   = 1*(ALPHA / DIGIT / "_")
+/// ident = 1*(ALPHA / DIGIT / "_")
 fn ident<'a>() -> impl Parser<'a, String> {
     token(regex("[a-zA-Z_][a-zA-Z0-9_]*", 0))
 }
