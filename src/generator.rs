@@ -143,74 +143,10 @@ fn gen_lvar(name: String, env: Environment) -> (String, Environment) {
 
 fn gen(tree: AST, env: Environment) -> (String, Environment) {
     match tree {
-        AST::Function { name, args, body } => {
-            let local_env = env.local_env();
-            let mut acc = vec![];
-            let (push_rbp, mut local_env) = gen_push("rbp", local_env);
-            let (alloc, names) = gen_alloc(args);
-            for (name, reg) in zip_with_reg(names) {
-                let (gen, _env) = gen_lvar(name, local_env);
-                let (pop_rax, _env) = gen_pop("rax", _env);
-                local_env = _env;
-                acc.push(
-                    vec![
-                        "# assign argument >>>>>",
-                        "# variable >>>>>",
-                        gen.as_str(),
-                        "# <<<<< variable",
-                        pop_rax.as_str(),
-                        format!("  mov [rax], {}", reg).as_str(),
-                        "# <<<<< assign",
-                    ]
-                    .join("\n"),
-                );
-            }
-            let (gen, local_env) = gen(*body, local_env);
-            (
-                vec![
-                    vec![
-                        "# function >>>>>",
-                        format!("{}:", name).as_str(),
-                        "# prologue >>>>>",
-                        push_rbp.as_str(),
-                        "  mov rbp, rsp",
-                        "# <<<<< prologue",
-                        "# allocate >>>>>",
-                        format!("  sub rsp, {}", alloc).as_str(),
-                        "# <<<<< allocate",
-                    ]
-                    .join("\n"),
-                    acc.join("\n"),
-                    vec![gen.as_str(), "# <<<<< function"].join("\n"),
-                ]
-                .join("\n"),
-                env.take_env(local_env),
-            )
-        }
-        AST::Literal { value } => {
-            let (push_value, env) = gen_push(value.to_string().as_str(), env);
-            (
-                vec!["# literal >>>>>", push_value.as_str(), "# <<<<< literal"].join("\n"),
-                env,
-            )
-        }
-        AST::Variable { name } => {
-            let (gen, env) = gen_lvar(name, env);
-            let (pop_rax, env) = gen_pop("rax", env);
-            let (push_rax, env) = gen_push("rax", env);
-            (
-                vec![
-                    "# variable >>>>>",
-                    gen.as_str(),
-                    pop_rax.as_str(),
-                    "  mov rax, [rax]",
-                    push_rax.as_str(),
-                    "# <<<<< variable",
-                ]
-                .join("\n"),
-                env,
-            )
-        }
+        AST::Address { lhs } => match *lhs {
+            AST::Variable { name } => gen_lvar(name, env),
+            _ => panic!("The value is not a variable."),
+        },
         AST::Assign { lhs, rhs } => {
             let (lhs_gen, env) = match *lhs {
                 AST::Variable { name } => gen_lvar(name, env),
@@ -237,82 +173,47 @@ fn gen(tree: AST, env: Environment) -> (String, Environment) {
                 env,
             )
         }
-        AST::If { cond, then, els } => {
-            let (els_label, env) = env.obtain_label(".Lifelse");
-            let (end_label, env) = env.obtain_label(".Lifend");
-            let (cond_gen, env) = gen(*cond, env);
-            let (pop_rax, env) = gen_pop("rax", env);
-            let (then_gen, env) = gen(*then, env);
-            if let Some(ast) = *els {
-                let (els_gen, env) = gen(ast, env);
-                (
-                    vec![
-                        "# if >>>>>",
-                        "# if-cond >>>>>",
-                        cond_gen.as_str(),
-                        "# <<<<< if-cond",
-                        pop_rax.as_str(),
-                        "  cmp rax, 0",
-                        format!("  je {}", els_label).as_str(),
-                        "# if-then >>>>>",
-                        then_gen.as_str(),
-                        "# <<<<< if-then",
-                        format!("  jmp {}", end_label).as_str(),
-                        format!("{}:", els_label).as_str(),
-                        "# if-else >>>>>",
-                        els_gen.as_str(),
-                        "# <<<<< if-else",
-                        format!("{}:", end_label).as_str(),
-                        "# <<<<< if",
-                    ]
-                    .join("\n"),
-                    env,
-                )
-            } else {
-                (
-                    vec![
-                        "# if >>>>>",
-                        "# if-cond >>>>>",
-                        cond_gen.as_str(),
-                        "# <<<<< if-cond",
-                        pop_rax.as_str(),
-                        "  cmp rax, 0",
-                        format!("  je {}", end_label).as_str(),
-                        "# if-then >>>>>",
-                        then_gen.as_str(),
-                        "# <<<<< if-then",
-                        format!("{}:", end_label).as_str(),
-                        "# <<<<< if",
-                    ]
-                    .join("\n"),
-                    env,
-                )
+        AST::Block { stmts } => {
+            let mut next_env = env;
+            let mut acc = vec!["# block >>>>>".to_string()];
+            for stmt in stmts.into_iter() {
+                let (gen, _env) = gen(stmt, next_env);
+                next_env = _env;
+                acc.push(gen);
             }
+            acc.push("# <<<<< block".to_string());
+            (acc.join("\n"), next_env)
         }
-        AST::While { cond, then } => {
-            let (bgn_label, env) = env.obtain_label(".Lwhilebgn");
-            let (end_label, env) = env.obtain_label(".Lwhileend");
-            let (cond_gen, env) = gen(*cond, env);
+        AST::Call { name, args } => {
+            let mut next_env = env;
+            let mut acc = vec!["# calling >>>>>".to_string()];
+            for (arg, reg) in zip_with_reg(args) {
+                let (gen, _env) = gen(arg, next_env);
+                let (pop_reg, _env) = gen_pop(reg.as_str(), _env);
+                next_env = _env;
+                acc.push(gen);
+                acc.push(pop_reg);
+            }
+            // bsp must be divisible by 16.
+            let adjustment = next_env.sp_offset() % 16;
+            if adjustment > 0 {
+                acc.push(format!("  sub rsp, {}", 16 - adjustment));
+            }
+            acc.push(format!("  call {}", name));
+            if adjustment > 0 {
+                acc.push(format!("  add rsp, {}", 16 - adjustment));
+            }
+            let (push_rax, next_env) = gen_push("rax", next_env);
+            acc.push(push_rax);
+            acc.push("# <<<<< calling".to_string());
+            (acc.join("\n"), next_env)
+        }
+        AST::Dereference { lhs } => {
+            let (gen_lhs, env) = gen(*lhs, env);
             let (pop_rax, env) = gen_pop("rax", env);
-            let (then_gen, env) = gen(*then, env);
+            let (push_rax, env) = gen_push("rax", env);
             (
-                vec![
-                    "# while >>>>>",
-                    format!("{}:", bgn_label).as_str(),
-                    "# while-cond >>>>>",
-                    cond_gen.as_str(),
-                    "# <<<<< while-cond",
-                    pop_rax.as_str(),
-                    "  cmp rax, 0",
-                    format!("  je {}", end_label).as_str(),
-                    "# while-then >>>>>",
-                    then_gen.as_str(),
-                    "# <<<<< while-then",
-                    format!("  jmp {}", bgn_label).as_str(),
-                    format!("{}:", end_label).as_str(),
-                    "# <<<<< while",
-                ]
-                .join("\n"),
+                vec![gen_lhs, pop_rax, "  mov rax, [rax]".to_string(), push_rax].join("\n"),
                 env,
             )
         }
@@ -410,58 +311,108 @@ fn gen(tree: AST, env: Environment) -> (String, Environment) {
                 env,
             )
         }
-        AST::Return { lhs } => {
-            let (lhs_gen, env) = gen(*lhs, env);
-            let (pop_rax, env) = gen_pop("rax", env);
-            let (pop_rbp, env) = gen_pop("rbp", env);
+        AST::Function { name, args, body } => {
+            let local_env = env.local_env();
+            let mut acc = vec![];
+            let (push_rbp, mut local_env) = gen_push("rbp", local_env);
+            let (alloc, names) = gen_alloc(args);
+            for (name, reg) in zip_with_reg(names) {
+                let (gen, _env) = gen_lvar(name, local_env);
+                let (pop_rax, _env) = gen_pop("rax", _env);
+                local_env = _env;
+                acc.push(
+                    vec![
+                        "# assign argument >>>>>",
+                        "# variable >>>>>",
+                        gen.as_str(),
+                        "# <<<<< variable",
+                        pop_rax.as_str(),
+                        format!("  mov [rax], {}", reg).as_str(),
+                        "# <<<<< assign",
+                    ]
+                    .join("\n"),
+                );
+            }
+            let (gen, local_env) = gen(*body, local_env);
             (
                 vec![
-                    "# return >>>>>",
-                    lhs_gen.as_str(),
-                    pop_rax.as_str(),
-                    "  mov rsp, rbp",
-                    pop_rbp.as_str(),
-                    "  ret",
-                    "# <<<<< return",
+                    vec![
+                        "# function >>>>>".to_string(),
+                        format!("{}:", name),
+                        "# prologue >>>>>".to_string(),
+                        push_rbp,
+                        "  mov rbp, rsp".to_string(),
+                        "# <<<<< prologue".to_string(),
+                        "# allocate >>>>>".to_string(),
+                        format!("  sub rsp, {}", alloc),
+                        "# <<<<< allocate".to_string(),
+                    ],
+                    acc,
+                    vec![gen, "# <<<<< function".to_string()],
                 ]
+                .concat()
                 .join("\n"),
-                env,
+                env.take_env(local_env),
             )
         }
-        AST::Block { stmts } => {
-            let mut next_env = env;
-            let mut acc = vec!["# block >>>>>".to_string()];
-            for stmt in stmts.into_iter() {
-                let (gen, _env) = gen(stmt, next_env);
-                next_env = _env;
-                acc.push(gen);
+        AST::If { cond, then, els } => {
+            let (els_label, env) = env.obtain_label(".Lifelse");
+            let (end_label, env) = env.obtain_label(".Lifend");
+            let (cond_gen, env) = gen(*cond, env);
+            let (pop_rax, env) = gen_pop("rax", env);
+            let (then_gen, env) = gen(*then, env);
+            if let Some(ast) = *els {
+                let (els_gen, env) = gen(ast, env);
+                (
+                    vec![
+                        "# if >>>>>",
+                        "# if-cond >>>>>",
+                        cond_gen.as_str(),
+                        "# <<<<< if-cond",
+                        pop_rax.as_str(),
+                        "  cmp rax, 0",
+                        format!("  je {}", els_label).as_str(),
+                        "# if-then >>>>>",
+                        then_gen.as_str(),
+                        "# <<<<< if-then",
+                        format!("  jmp {}", end_label).as_str(),
+                        format!("{}:", els_label).as_str(),
+                        "# if-else >>>>>",
+                        els_gen.as_str(),
+                        "# <<<<< if-else",
+                        format!("{}:", end_label).as_str(),
+                        "# <<<<< if",
+                    ]
+                    .join("\n"),
+                    env,
+                )
+            } else {
+                (
+                    vec![
+                        "# if >>>>>",
+                        "# if-cond >>>>>",
+                        cond_gen.as_str(),
+                        "# <<<<< if-cond",
+                        pop_rax.as_str(),
+                        "  cmp rax, 0",
+                        format!("  je {}", end_label).as_str(),
+                        "# if-then >>>>>",
+                        then_gen.as_str(),
+                        "# <<<<< if-then",
+                        format!("{}:", end_label).as_str(),
+                        "# <<<<< if",
+                    ]
+                    .join("\n"),
+                    env,
+                )
             }
-            acc.push("# <<<<< block".to_string());
-            (acc.join("\n"), next_env)
         }
-        AST::Call { name, args } => {
-            let mut next_env = env;
-            let mut acc = vec!["# calling >>>>>".to_string()];
-            for (arg, reg) in zip_with_reg(args) {
-                let (gen, _env) = gen(arg, next_env);
-                let (pop_reg, _env) = gen_pop(reg.as_str(), _env);
-                next_env = _env;
-                acc.push(gen);
-                acc.push(pop_reg);
-            }
-            // bsp must be divisible by 16.
-            let adjustment = next_env.sp_offset() % 16;
-            if adjustment > 0 {
-                acc.push(format!("  sub rsp, {}", 16 - adjustment));
-            }
-            acc.push(format!("  call {}", name));
-            if adjustment > 0 {
-                acc.push(format!("  add rsp, {}", 16 - adjustment));
-            }
-            let (push_rax, next_env) = gen_push("rax", next_env);
-            acc.push(push_rax);
-            acc.push("# <<<<< calling".to_string());
-            (acc.join("\n"), next_env)
+        AST::Literal { value } => {
+            let (push_value, env) = gen_push(value.to_string().as_str(), env);
+            (
+                vec!["# literal >>>>>", push_value.as_str(), "# <<<<< literal"].join("\n"),
+                env,
+            )
         }
         AST::Operator { kind, lhs, rhs } => {
             let (lhs_gen, env) = gen(*lhs, env);
@@ -517,6 +468,68 @@ fn gen(tree: AST, env: Environment) -> (String, Environment) {
                     vec![push_rax.as_str(), "# <<<<< operator"],
                 ]
                 .concat()
+                .join("\n"),
+                env,
+            )
+        }
+        AST::Return { lhs } => {
+            let (lhs_gen, env) = gen(*lhs, env);
+            let (pop_rax, env) = gen_pop("rax", env);
+            let (pop_rbp, env) = gen_pop("rbp", env);
+            (
+                vec![
+                    "# return >>>>>",
+                    lhs_gen.as_str(),
+                    pop_rax.as_str(),
+                    "  mov rsp, rbp",
+                    pop_rbp.as_str(),
+                    "  ret",
+                    "# <<<<< return",
+                ]
+                .join("\n"),
+                env,
+            )
+        }
+        AST::Variable { name } => {
+            let (gen, env) = gen_lvar(name, env);
+            let (pop_rax, env) = gen_pop("rax", env);
+            let (push_rax, env) = gen_push("rax", env);
+            (
+                vec![
+                    "# variable >>>>>",
+                    gen.as_str(),
+                    pop_rax.as_str(),
+                    "  mov rax, [rax]",
+                    push_rax.as_str(),
+                    "# <<<<< variable",
+                ]
+                .join("\n"),
+                env,
+            )
+        }
+        AST::While { cond, then } => {
+            let (bgn_label, env) = env.obtain_label(".Lwhilebgn");
+            let (end_label, env) = env.obtain_label(".Lwhileend");
+            let (cond_gen, env) = gen(*cond, env);
+            let (pop_rax, env) = gen_pop("rax", env);
+            let (then_gen, env) = gen(*then, env);
+            (
+                vec![
+                    "# while >>>>>",
+                    format!("{}:", bgn_label).as_str(),
+                    "# while-cond >>>>>",
+                    cond_gen.as_str(),
+                    "# <<<<< while-cond",
+                    pop_rax.as_str(),
+                    "  cmp rax, 0",
+                    format!("  je {}", end_label).as_str(),
+                    "# while-then >>>>>",
+                    then_gen.as_str(),
+                    "# <<<<< while-then",
+                    format!("  jmp {}", bgn_label).as_str(),
+                    format!("{}:", end_label).as_str(),
+                    "# <<<<< while",
+                ]
                 .join("\n"),
                 env,
             )

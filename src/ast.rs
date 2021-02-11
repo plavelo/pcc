@@ -12,43 +12,12 @@ pub enum OpKind {
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum AST {
-    Function {
-        name: String,
-        args: Vec<AST>,
-        body: Box<AST>,
-    },
-    Operator {
-        kind: OpKind,
+    Address {
         lhs: Box<AST>,
-        rhs: Box<AST>,
-    },
-    Literal {
-        value: usize,
-    },
-    Variable {
-        name: String,
     },
     Assign {
         lhs: Box<AST>,
         rhs: Box<AST>,
-    },
-    If {
-        cond: Box<AST>,
-        then: Box<AST>,
-        els: Box<Option<AST>>,
-    },
-    While {
-        cond: Box<AST>,
-        then: Box<AST>,
-    },
-    For {
-        init: Box<Option<AST>>,
-        cond: Box<Option<AST>>,
-        inc: Box<Option<AST>>,
-        then: Box<AST>,
-    },
-    Return {
-        lhs: Box<AST>,
     },
     Block {
         stmts: Vec<AST>,
@@ -56,5 +25,45 @@ pub enum AST {
     Call {
         name: String,
         args: Vec<AST>,
+    },
+    Definition {
+        name: String,
+    },
+    Dereference {
+        lhs: Box<AST>,
+    },
+    For {
+        init: Box<Option<AST>>,
+        cond: Box<Option<AST>>,
+        inc: Box<Option<AST>>,
+        then: Box<AST>,
+    },
+    Function {
+        name: String,
+        args: Vec<AST>,
+        body: Box<AST>,
+    },
+    If {
+        cond: Box<AST>,
+        then: Box<AST>,
+        els: Box<Option<AST>>,
+    },
+    Literal {
+        value: usize,
+    },
+    Operator {
+        kind: OpKind,
+        lhs: Box<AST>,
+        rhs: Box<AST>,
+    },
+    Return {
+        lhs: Box<AST>,
+    },
+    Variable {
+        name: String,
+    },
+    While {
+        cond: Box<AST>,
+        then: Box<AST>,
     },
 }

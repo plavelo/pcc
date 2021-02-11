@@ -43,12 +43,12 @@ fn func_def<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// stmt       = stmt_block
-///            | stmt_if
-///            | stmt_while
-///            | stmt_for
-///            | stmt_return
-///            | stmt_expr
+/// stmt = stmt_block
+///      | stmt_if
+///      | stmt_while
+///      | stmt_for
+///      | stmt_return
+///      | stmt_expr
 #[derive(Clone)]
 struct Stmt;
 impl<'a> Parser<'a, AST> for Stmt {
@@ -67,7 +67,7 @@ fn stmt<'a>() -> impl Parser<'a, AST> {
     Stmt
 }
 
-/// stmt_expr  = expr ";"
+/// stmt_expr = expr ";"
 fn stmt_expr<'a>() -> impl Parser<'a, AST> {
     skip(expr(), token(string(";")))
 }
@@ -80,7 +80,7 @@ fn stmt_block<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// stmt_if    = "if" "(" expr ")" stmt ("else" stmt)?
+/// stmt_if = "if" "(" expr ")" stmt ("else" stmt)?
 fn stmt_if<'a>() -> impl Parser<'a, AST> {
     map(
         and(
@@ -174,12 +174,12 @@ fn stmt_return<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// expr       = assign
+/// expr = assign
 fn expr<'a>() -> impl Parser<'a, AST> {
     assign()
 }
 
-/// assign     = equality ("=" assign)?
+/// assign = equality ("=" assign)?
 #[derive(Clone)]
 struct Assign;
 impl<'a> Parser<'a, AST> for Assign {
@@ -204,7 +204,7 @@ fn assign<'a>() -> impl Parser<'a, AST> {
     Assign
 }
 
-/// equality   = relational ("==" relational | "!=" relational)*
+/// equality = relational ("==" relational | "!=" relational)*
 fn equality<'a>() -> impl Parser<'a, AST> {
     map(
         and(
@@ -259,7 +259,7 @@ fn relational<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// add        = mul ("+" mul | "-" mul)*
+/// add = mul ("+" mul | "-" mul)*
 fn add<'a>() -> impl Parser<'a, AST> {
     map(
         and(
@@ -284,7 +284,7 @@ fn add<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// mul     = unary ("*" unary | "/" unary)*
+/// mul = unary ("*" unary | "/" unary)*
 fn mul<'a>() -> impl Parser<'a, AST> {
     map(
         and(
@@ -309,8 +309,20 @@ fn mul<'a>() -> impl Parser<'a, AST> {
     )
 }
 
-/// unary      = ("+" | "-")? primary
+/// unary = signed | address | dereference
+#[derive(Clone)]
+struct Unary;
+impl<'a> Parser<'a, AST> for Unary {
+    fn parse(&self, input: &'a str, position: usize) -> Result<Success<AST>, Failure> {
+        or(or(signed(), address()), dereference()).parse(input, position)
+    }
+}
 fn unary<'a>() -> impl Parser<'a, AST> {
+    Unary
+}
+
+/// signed = ("+" | "-")? primary
+fn signed<'a>() -> impl Parser<'a, AST> {
     map(
         and(at_most(or(string("+"), string("-")), 1), primary()),
         |(ops, primary)| {
@@ -329,6 +341,20 @@ fn unary<'a>() -> impl Parser<'a, AST> {
             }
         },
     )
+}
+
+/// address = "*" unary
+fn address<'a>() -> impl Parser<'a, AST> {
+    map(then(string("*"), unary()), |input| AST::Address {
+        lhs: Box::new(input),
+    })
+}
+
+/// dereference = "&" unary
+fn dereference<'a>() -> impl Parser<'a, AST> {
+    map(then(string("&"), unary()), |input| AST::Dereference {
+        lhs: Box::new(input),
+    })
 }
 
 /// primary = num | func_call | var | "(" expr ")"
